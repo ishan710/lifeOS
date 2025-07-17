@@ -1,26 +1,25 @@
 "use client";
-import React, { useState, useRef } from "react";
+import React, { useState } from "react";
 import { addNote } from "../lib/api";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/note/add";
-
-const getSpeechRecognition = () => {
-  if (typeof window === "undefined") return null;
-  return (
-    (window as any).SpeechRecognition ||
-    (window as any).webkitSpeechRecognition ||
-    null
-  );
-};
+import { useSpeechRecognition } from "../hooks/useSpeechRecognition";
+import RecordButton from "./RecordButton";
+import StatusMessage from "./StatusMessage";
+import TaskList from "./TaskList";
+import styles from "./NoteInput.module.css";
 
 const NoteInput: React.FC = () => {
   const [note, setNote] = useState("");
   const [userName, setUserName] = useState("");
-  const [isRecording, setIsRecording] = useState(false);
-  const [status, setStatus] = useState<string | null>(null);
   const [createdTasks, setCreatedTasks] = useState<string[]>([]);
-  const recognitionRef = useRef<any>(null);
-  const isRecordingRef = useRef(false);
+  const [submitStatus, setSubmitStatus] = useState<string | null>(null);
+
+  // Handle transcript from speech recognition
+  const handleTranscript = (transcript: string) => {
+    setNote((prev) => prev + (prev ? " " : "") + transcript);
+  };
+
+  // Use speech recognition hook
+  const speechRecognition = useSpeechRecognition(handleTranscript);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setNote(e.target.value);
@@ -30,115 +29,105 @@ const NoteInput: React.FC = () => {
     setUserName(e.target.value);
   };
 
-  const handleStartRecording = () => {
-    const SpeechRecognition = getSpeechRecognition();
-    if (!SpeechRecognition) {
-      setStatus("Speech recognition not supported in this browser.");
-      return;
-    }
-    const recognition = new SpeechRecognition();
-    recognition.lang = "en-US";
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-    recognition.continuous = true;
-    recognition.onresult = (event: any) => {
-      const transcript = event.results[event.results.length - 1][0].transcript;
-      setNote((prev) => prev + (prev ? " " : "") + transcript);
-      setStatus("Voice captured.");
-    };
-    recognition.onerror = (event: any) => {
-      setStatus("Voice recognition error: " + event.error);
-      setIsRecording(false);
-      isRecordingRef.current = false;
-    };
-    recognition.onend = () => {
-      // If user hasn't stopped, restart
-      if (isRecordingRef.current) {
-        recognition.start();
-      }
-    };
-    recognitionRef.current = recognition;
-    isRecordingRef.current = true;
-    recognition.start();
-    setIsRecording(true);
-    setStatus("Listening...");
-  };
-
-  const handleStopRecording = () => {
-    setIsRecording(false);
-    isRecordingRef.current = false;
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-      setStatus("Stopped recording.");
-    }
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setStatus("Processing note...");
+    setSubmitStatus("Processing note...");
     setCreatedTasks([]);
     
     try {
       const result = await addNote(note, userName);
       if (result.status === "success") {
-        setStatus("Note processed successfully!");
+        setSubmitStatus("Note processed successfully!");
         setNote("");
         if (result.created_tasks && result.created_tasks.length > 0) {
           setCreatedTasks(result.created_tasks);
-          setStatus(`Note processed! Created tasks: ${result.created_tasks.join(", ")}`);
+          setSubmitStatus(`Note processed! Created tasks: ${result.created_tasks.join(", ")}`);
         } else {
-          setStatus("Note processed! No tasks were created.");
+          setSubmitStatus("Note processed! No tasks were created.");
         }
       } else {
-        setStatus(result.message || "Error processing note.");
+        setSubmitStatus(result.message || "Error processing note.");
       }
-    } catch (err) {
-      setStatus("Error processing note.");
+    } catch (error) {
+      console.error("Error processing note:", error);
+      setSubmitStatus("Error processing note.");
     }
   };
 
+  const isSubmitDisabled = !note.trim();
+  const isRecordingError = speechRecognition.status?.includes("error") || 
+                          speechRecognition.status?.includes("Microphone") ||
+                          speechRecognition.status?.includes("denied");
+
   return (
-    <div style={{ maxWidth: 500, margin: "2rem auto", padding: 24, border: "1px solid #eee", borderRadius: 8 }}>
+    <div className={styles.container}>
       <form onSubmit={handleSubmit}>
         <input
           type="text"
           value={userName}
           onChange={handleUserNameChange}
           placeholder="Your name (optional)"
-          style={{ width: "100%", marginBottom: 8 }}
+          className={styles.input}
         />
+        
         <textarea
           value={note}
           onChange={handleInputChange}
           rows={4}
           placeholder="Type or dictate your note..."
-          style={{ width: "100%", marginBottom: 12 }}
+          className={styles.textarea}
         />
-        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-          {!isRecording ? (
-            <button type="button" onClick={handleStartRecording}>
-              🎤 Start Recording
-            </button>
+        
+        <div className={styles.controls}>
+          {speechRecognition.isHydrated ? (
+            <RecordButton
+              isRecording={speechRecognition.isRecording}
+              isPressed={speechRecognition.isPressed}
+              disabled={!speechRecognition.isSupported}
+              onMouseDown={speechRecognition.handleMouseDown}
+              onMouseUp={speechRecognition.handleMouseUp}
+              onMouseLeave={speechRecognition.handleMouseLeave}
+              onClick={speechRecognition.handleClick}
+            />
           ) : (
-            <button type="button" onClick={handleStopRecording}>
-              ⏹️ Stop Recording
-            </button>
+            <div className={`${styles.recordButton} ${styles.placeholder}`}>
+              <div className={styles.recordDot} />
+              🎤 Hold to Record
+            </div>
           )}
-          <button type="submit" disabled={!note.trim()}>
+          
+          <span className={styles.helpText}>
+            Hold button down to record
+          </span>
+          
+          <span className={styles.helpText}>
+            or hold Shift + N
+          </span>
+          
+          <button 
+            type="submit" 
+            disabled={isSubmitDisabled}
+            className={`${styles.submitButton} ${isSubmitDisabled ? styles.disabled : styles.enabled}`}
+          >
             Submit
           </button>
         </div>
-        {status && <div style={{ color: status.includes("error") ? "red" : "#333" }}>{status}</div>}
-        {createdTasks.length > 0 && (
-          <div style={{ marginTop: 12, padding: 8, backgroundColor: "#e8f5e8", borderRadius: 4 }}>
-            <strong>Created tasks:</strong>
-            <ul style={{ margin: "4px 0", paddingLeft: 20 }}>
-              {createdTasks.map((task, index) => (
-                <li key={index}>{task}</li>
-              ))}
-            </ul>
-          </div>
+        
+        {speechRecognition.status && (
+          <StatusMessage 
+            message={speechRecognition.status} 
+            isError={isRecordingError}
+          />
         )}
+        
+        {submitStatus && (
+          <StatusMessage 
+            message={submitStatus} 
+            isError={submitStatus.includes("error")}
+          />
+        )}
+        
+        <TaskList tasks={createdTasks} />
       </form>
     </div>
   );

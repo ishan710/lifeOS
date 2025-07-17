@@ -1,0 +1,176 @@
+.container {
+  max-width: 600px;
+  margin: 2rem auto;
+  padding: 32px;
+  border: 1px solid #e1e5e9;
+  border-radius: 16px;
+  background-color: #ffffff;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+.input {
+  width: 100%;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+.input:focus {
+  border-color: #3264fe;
+}
+
+.textarea {
+  width: 100%;
+  margin-bottom: 20px;
+  padding: 16px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 14px;
+  resize: vertical;
+  outline: none;
+  transition: border-color 0.2s ease;
+  font-family: inherit;
+}
+
+.textarea:focus {
+  border-color: #3264fe;
+}
+
+.controls {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+  align-items: center;
+}
+
+.recordButton {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border: none;
+  border-radius: 50px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-width: 140px;
+  justify-content: center;
+  background-color: #3b82f6;
+  color: white;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.recordButton:disabled {
+  background-color: #d1d5db;
+  color: #6b7280;
+  cursor: not-allowed;
+}
+
+.recordButton.recording {
+  background-color: #ef4444;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.7), 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.recordButton.pressed {
+  transform: scale(0.95);
+}
+
+.recordButton.placeholder {
+  background-color: #d1d5db;
+  color: #6b7280;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.recordDot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background-color: white;
+}
+
+.recordDot.pulsing {
+  animation: pulse 1.5s infinite;
+}
+
+.helpText {
+  font-size: 12px;
+  color: #6b7280;
+  font-style: italic;
+}
+
+.submitButton {
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  margin-left: auto;
+}
+
+.submitButton.enabled {
+  background-color: #10b981;
+  color: white;
+  cursor: pointer;
+}
+
+.submitButton.disabled {
+  background-color: #d1d5db;
+  color: #6b7280;
+  cursor: not-allowed;
+}
+
+.status {
+  font-size: 14px;
+  padding: 8px 12px;
+  border-radius: 6px;
+}
+
+.status.error {
+  color: #dc2626;
+  background-color: #fef2f2;
+  border: 1px solid #fecaca;
+}
+
+.status.success {
+  color: #333;
+  background-color: #f0fdf4;
+  border: 1px solid #bbf7d0;
+}
+
+.tasksContainer {
+  margin-top: 16px;
+  padding: 16px;
+  background-color: #f0fdf4;
+  border-radius: 8px;
+  border: 1px solid #bbf7d0;
+}
+
+.tasksTitle {
+  color: #059669;
+  margin-bottom: 8px;
+}
+
+.tasksList {
+  margin: 8px 0;
+  padding-left: 20px;
+  color: #047857;
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 1;
+  }
+} 
