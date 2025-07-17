@@ -3,4 +3,13 @@ uvicorn
 openai
 pydantic
 pydantic-settings
-supabase 
+supabase
+langchain-openai
+langchain
+pinecone-client
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+google-api-python-client
+authlib
+python-jose[cryptography] 
