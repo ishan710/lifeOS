@@ -19,11 +19,11 @@ class VectorStore:
         )
         return response.data[0].embedding
     
-    def search(self, embedding, top_k=5, user_name=None):
+    def search(self, embedding, top_k=5, filter=None):
         # user_name filter is optional
         return self.dense_index.query(
             vector=embedding,
             top_k=top_k,
             include_metadata=True,
-            filter={"user": user_name} if user_name else None
+            filter=filter
         )

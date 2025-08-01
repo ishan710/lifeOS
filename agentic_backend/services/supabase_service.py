@@ -74,3 +74,44 @@ class SupabaseService:
         # This would use Supabase's vector similarity search
         # For now, return a placeholder
         return self.supabase.table("notes").select("*").eq("user_name", user_name).limit(limit).execute() 
+
+    async def create_or_get_user(self, email: str, user_name: str) -> Dict[str, Any]:
+        """Create a new user or get existing user"""
+        try:
+            # Try to get existing user
+            response = self.supabase.table("users").select("*").eq("email", email).execute()
+            
+            if response.data:
+                # User exists, return existing user
+                return {"success": True, "user": response.data[0], "is_new": False}
+            else:
+                # Create new user
+                new_user = {
+                    "email": email,
+                    "user_name": user_name
+                }
+                response = self.supabase.table("users").insert(new_user).execute()
+                
+                if response.data:
+                    return {"success": True, "user": response.data[0], "is_new": True}
+                else:
+                    return {"success": False, "error": "Failed to create user"}
+                    
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+        """Get user by email"""
+        try:
+            response = self.supabase.table("users").select("*").eq("email", email).execute()
+            return response.data[0] if response.data else None
+        except Exception as e:
+            return None
+
+    async def get_user_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """Get user by ID"""
+        try:
+            response = self.supabase.table("users").select("*").eq("id", user_id).execute()
+            return response.data[0] if response.data else None
+        except Exception as e:
+            return None 

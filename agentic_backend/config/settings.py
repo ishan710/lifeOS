@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     # LLM APIs
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
+    tavily_api_key: str = os.getenv("TAVILY_API_KEY", "")
     
     # Vector Database
     pinecone_api_key: str = os.getenv("PINECONE_API_KEY", "")
@@ -19,10 +20,7 @@ class Settings(BaseSettings):
     google_client_secret: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
     google_redirect_uri: str = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:3000/auth/gmail/callback")
     
-    # JWT Configuration for session management
-    jwt_secret_key: str = os.getenv("JWT_SECRET_KEY", "your-secret-key-change-this")
-    jwt_algorithm: str = "HS256"
-    jwt_expiration_hours: int = 24
+
 
     class Config:
         env_file = ".env"
