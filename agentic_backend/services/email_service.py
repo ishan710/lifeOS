@@ -6,6 +6,8 @@ Consolidates all email-related functionality: Gmail access, chunking, embeddings
 import os
 import logging
 import base64
+import html
+from re import L
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from google.auth.transport.requests import Request
@@ -18,6 +20,9 @@ from agentic_backend.config.settings import settings
 from agentic_backend.services.supabase_service import SupabaseService
 from agentic_backend.vector_store import VectorStore
 from agentic_backend.services.text_chunking_service import TextChunkingService
+from agentic_backend.types.schema import Email, ApiResponse, Chunk, EmailEmbedding, User, dataclass_to_dict
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -120,25 +125,35 @@ class EmailService:
     
     # ==================== Gmail API Methods ====================
     
-    async def get_emails(
+    async def get_new_emails(
         self, 
-        user_id: str, 
+        user: User, 
         query: str = "", 
         max_results: int = 10, 
-        exclude_email_ids: Optional[List[str]] = None
-    ) -> List[Dict[str, Any]]:
-        """Get emails from Gmail API."""
-        credentials = await self._get_credentials(user_id)
+        exclude_email_ids: Optional[List[str]] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None
+    ) -> List[Email]:
+        """Get emails from Gmail API with optional date filtering."""
+        credentials = await self._get_credentials(user.email)
         if not credentials:
             raise Exception("No Gmail credentials found. Please authenticate first.")
         
         try:
             service = build('gmail', 'v1', credentials=credentials)
-            
             # Build query
             gmail_query = "category:primary"
             if query:
                 gmail_query += f" {query}"
+            
+            # Add date filtering if provided
+            if start_date and end_date:
+                # Format dates for Gmail query (YYYY/MM/DD format)
+                gmail_query += f" after:{start_date} before:{end_date}"
+            elif start_date:
+                gmail_query += f" after:{start_date}"
+            elif end_date:
+                gmail_query += f" before:{end_date}"
             
             # Get messages
             results = service.users().messages().list(
@@ -156,7 +171,7 @@ class EmailService:
                 messages = [msg for msg in messages if msg['id'] not in exclude_email_ids]
             
             # Get full message details
-            emails = []
+            emails: List[Email] = []
             for message in messages:
                 try:
                     msg = service.users().messages().get(
@@ -165,7 +180,7 @@ class EmailService:
                         format='full'
                     ).execute()
                     
-                    parsed_email = self._parse_email_message(msg)
+                    parsed_email = self._parse_email_message(msg, user)
                     emails.append(parsed_email)
                     
                 except Exception as e:
@@ -178,75 +193,135 @@ class EmailService:
             logger.error(f"Gmail API error: {error}")
             raise Exception(f"Gmail API error: {error}")
     
-    def _parse_email_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
+    def _parse_email_message(self, message: Dict[str, Any], user: User) -> Email:
         """Parse Gmail message into structured format."""
+        
         def find_header(name: str) -> str:
-            headers = message.get('payload', {}).get('headers', [])
+            payload = message.get('payload', {})
+            headers = payload.get('headers', [])
             for header in headers:
                 if header.get('name', '').lower() == name.lower():
                     return header.get('value', '')
             return ''
         
-        return {
-            'id': message.get('id', ''),
-            'threadId': message.get('threadId', ''),
-            'subject': find_header('subject'),
-            'from': find_header('from'),
-            'to': find_header('to'),
-            'date': find_header('date'),
-            'body': self._extract_body(message.get('payload', {})),
-            'snippet': message.get('snippet', '')
-        }
+        body = self._extract_body(message.get('payload', {}))
+        
+        # Convert timestamp to datetime
+        timestamp = message.get('internalDate', '')
+        if timestamp:
+            try:
+                email_timestamp = datetime.fromtimestamp(int(timestamp) / 1000)
+            except:
+                email_timestamp = datetime.now()
+        else:
+            email_timestamp = datetime.now()
+        
+        return Email(
+            email_id=message.get('id', ''),
+            created_at=datetime.now(),
+            email_timestamp=email_timestamp,
+            user_email_id=user.email,  # Use the user's email address
+            content=body,
+            sender=find_header('from'),
+        )
     
     def _extract_body(self, payload: Dict[str, Any]) -> str:
         """Extract text body from email payload."""
-        def extract_text_from_payload(payload_part: Dict[str, Any]) -> str:
-            if 'parts' in payload_part:
-                # Multipart message
-                for part in payload_part['parts']:
-                    mime_type = part.get('mimeType', '')
-                    
-                    # Skip non-text content
-                    if mime_type.startswith('image/') or mime_type in [
-                        'application/pdf', 
-                        'application/msword',
-                        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                        'application/octet-stream'
-                    ]:
-                        continue
-                    
-                    if mime_type == 'text/plain':
-                        # Found plain text part
-                        data = part.get('body', {}).get('data', '')
-                        if data:
-                            try:
-                                text = base64.urlsafe_b64decode(data).decode('utf-8')
-                                return text
-                            except Exception as e:
-                                logger.warning(f"Error decoding text part: {e}")
-                    
-                    # Recursively check nested parts
-                    if 'parts' in part:
-                        result = extract_text_from_payload(part)
-                        if result:
-                            return result
-            
-            # Single part message
-            mime_type = payload_part.get('mimeType', '')
-            if mime_type == 'text/plain':
-                data = payload_part.get('body', {}).get('data', '')
-                if data:
-                    try:
-                        text = base64.urlsafe_b64decode(data).decode('utf-8')
-                        # Clean up text
-                        text = ' '.join(text.split())  # Normalize whitespace
-                        return text
-                    except Exception as e:
-                        logger.warning(f"Error decoding single part: {e}")
-            
-            return ""
+        import re
         
-        return extract_text_from_payload(payload)
+        def clean_text(text: str) -> str:
+            """Clean and normalize text content."""
+            if not text:
+                return ""
+            text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
+            text = re.sub(r'[\.#][a-zA-Z0-9\-_]+\s*\{[^}]*\}', '', text)
+            text = re.sub(r'[a-zA-Z\-]+:\s*[^;]+;', '', text)
+            text = re.sub(r'@media[^{]*\{[^}]*\}', '', text, flags=re.DOTALL)
+            text = re.sub(r'<[^>]+>', '', text)
+            text = html.unescape(text)
+            text = re.sub(r'&[a-zA-Z0-9#]+;', '', text)
+            text = ' '.join(text.split())
+            text = re.sub(r'[^\x20-\x7E\n\r\t]', '', text)
+            return text.strip()
+
+        def extract_text_from_parts(parts: list) -> str:
+            """Recursively extract text from multipart email."""
+            for part in parts:
+                mime_type = part.get("mimeType", "")
+                body_data = part.get("body", {}).get("data", "")
+                
+                # Skip non-text content
+                if mime_type.startswith('image/') or mime_type in [
+                    'application/pdf', 
+                    'application/msword',
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                    'application/octet-stream',
+                    'application/zip',
+                    'application/x-zip-compressed'
+                ]:
+                    continue
+                
+                # Prefer text/plain over text/html
+                if mime_type == "text/plain" and body_data:
+                    try:
+                        decoded = base64.urlsafe_b64decode(body_data).decode("utf-8", errors="replace")
+                        cleaned = clean_text(decoded)
+                        if cleaned:
+                            return cleaned
+                    except Exception as e:
+                        logger.warning(f"Failed to decode text/plain: {e}")
+                        continue
+                
+                # Fallback to text/html if no text/plain
+                elif mime_type == "text/html" and body_data:
+                    try:
+                        decoded = base64.urlsafe_b64decode(body_data).decode("utf-8", errors="replace")
+                        # Basic HTML tag removal
+                        import re
+                        html_cleaned = re.sub(r'<[^>]+>', '', decoded)  # Remove HTML tags
+                        cleaned = clean_text(html_cleaned)
+                        if cleaned:
+                            return cleaned
+                    except Exception as e:
+                        logger.warning(f"Failed to decode text/html: {e}")
+                        continue
+                
+                # Recursively check nested parts
+                if "parts" in part:
+                    result = extract_text_from_parts(part["parts"])
+                    if result:
+                        return result
+
+            return ""
+
+        # Handle multipart emails
+        if "parts" in payload:
+            result = extract_text_from_parts(payload["parts"])
+            if result:
+                return result
+
+        # Handle single-part emails
+        mime_type = payload.get("mimeType", "")
+        data = payload.get("body", {}).get("data", "")
+        
+        if mime_type == "text/plain" and data:
+            try:
+                decoded = base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
+                return clean_text(decoded)
+            except Exception as e:
+                logger.warning(f"Failed to decode single-part text/plain: {e}")
+        
+        elif mime_type == "text/html" and data:
+            try:
+                decoded = base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
+                # Basic HTML tag removal
+                import re
+                html_cleaned = re.sub(r'<[^>]+>', '', decoded)  # Remove HTML tags
+                return clean_text(html_cleaned)
+            except Exception as e:
+                logger.warning(f"Failed to decode single-part text/html: {e}")
+
+        return ""
     
     async def test_connection(self, user_id: str) -> Dict[str, Any]:
         """Test Gmail connection."""
@@ -269,333 +344,214 @@ class EmailService:
             return {"success": False, "error": str(e)}
     
     # ==================== Supabase Sync Methods ====================
+
     
-    async def sync_emails_to_supabase(
+    async def sync_emails(
         self, 
-        user_id: str, 
+        user: User, 
         max_emails: int = 50,
-        batch_size: int = 10
-    ) -> Dict[str, Any]:
-        """Sync emails to Supabase in batches."""
+        batch_size: int = 10,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None
+    ) -> ApiResponse:
+        """Sync emails to Supabase and Pinecone in one step."""
         try:
-            # Get emails from Gmail
-            gmail_emails = await self.get_emails(user_id, max_results=max_emails)
+            # Get emails from Gmail with date filtering
+            existing_email_ids = await self._get_existing_email_ids(user)
             
+            gmail_emails = await self.get_new_emails(
+                user=user, 
+                max_results=max_emails,
+                start_date=start_date,
+                end_date=end_date,
+                exclude_email_ids=existing_email_ids
+            )
             if not gmail_emails:
-                return {
-                    "success": True,
-                    "message": "No emails found in Gmail",
-                    "total_emails": 0,
-                    "synced_to_supabase": 0
-                }
-            
-            # Get existing email IDs from Supabase to avoid duplicates
-            existing_email_ids = await self._get_existing_email_ids(user_id)
-            
-            # Filter out already synced emails
-            new_emails = [
-                email for email in gmail_emails 
-                if email.get('id') and email.get('id') not in existing_email_ids
-            ]
-            
-            if not new_emails:
-                return {
-                    "success": True,
-                    "message": "All emails already synced to Supabase",
-                    "total_emails": len(gmail_emails),
-                    "synced_to_supabase": 0
-                }
-            
-            # Sync to Supabase in batches
-            successful = 0
+                            return ApiResponse(
+                success=True,
+                message=f"No new emails found in Gmail"
+            )
+        
+            # Sync to both Supabase and Pinecone in batches
             errors = []
+
+            for i in range(0, len(gmail_emails), batch_size):
+                batch = gmail_emails[i:i + batch_size]
+                batch_result = await self._sync_batch_to_supabase_and_pinecone(batch, user)
+                if not batch_result.success:
+                    errors.append(batch_result.message)
             
-            for i in range(0, len(new_emails), batch_size):
-                batch = new_emails[i:i + batch_size]
-                batch_result = await self._sync_batch_to_supabase(batch, user_id)
-                successful += batch_result["successful"]
-                errors.extend(batch_result["errors"])
-            
-            return {
-                "success": True,
-                "total_emails": len(gmail_emails),
-                "new_emails": len(new_emails),
-                "synced_to_supabase": successful,
-                "errors": errors
-            }
+            return ApiResponse(
+                success=True,
+                message="Emails synced to Supabase and Pinecone"
+            )
             
         except Exception as e:
-            logger.error(f"Error syncing emails for user {user_id}: {e}")
-            return {"success": False, "error": str(e)}
+            logger.error(f"Error syncing emails for user {user.id}: {e}")
+            return ApiResponse(
+                success=False,
+                message=str(e)
+            )
     
-    async def _get_existing_email_ids(self, user_id: str) -> List[str]:
+    async def _get_existing_email_ids(self, user: User) -> List[str]:
         """Get existing email IDs from Supabase."""
         try:
-            user = await self.supabase.get_user_by_email(user_id)
             if not user:
                 return []
             
-            # Query the emails table using the correct schema
-            response = self.supabase.supabase.table("emails").select("email_id").eq("user_id", user['id']).execute()
+            response = self.supabase.supabase.table("emails").select("email_id").eq("user_email_id", user.email).execute()
             return [email['email_id'] for email in response.data] if response.data else []
-            
+
         except Exception as e:
             logger.error(f"Error getting existing email IDs: {e}")
             return []
     
-    async def _sync_batch_to_supabase(
+ 
+   
+    async def _sync_batch_to_supabase_and_pinecone(
         self, 
-        emails: List[Dict[str, Any]], 
-        user_id: str
-    ) -> Dict[str, Any]:
-        """Sync a batch of emails to Supabase."""
+        emails: List[Email], 
+        user: User
+    ) -> ApiResponse:
+        """Sync a batch of emails to both Supabase and Pinecone."""
         try:
-            user = await self.supabase.get_user_by_email(user_id)
-            if not user:
-                return {"successful": 0, "errors": [f"User {user_id} not found"]}
-            
-            batch_data = []
+            batch_data: List[Email] = []
+           
+            # Process each email and store embeddings
             for email in emails:
-                # Ensure content is not null (required field in schema)
-                content = email.get('body', '')
-                if not content:
-                    content = email.get('snippet', '') or 'No content available'
-                
-                email_data = {
-                    "email_id": email.get('id'),
-                    "user_id": user['id'],
-                    "subject": email.get('subject', ''),
-                    "content": content,
-                    "processed": False
-                }
-                batch_data.append(email_data)
-            
-            if batch_data:
-                print("batch_data", len(batch_data))
                 try:
-                    response = self.supabase.supabase.table("emails").insert(batch_data).execute()
-                    return {"successful": len(response.data) if response.data else 0, "errors": []}
-                except Exception as insert_error:
-                    # Handle unique constraint violations gracefully
-                    if "duplicate key value violates unique constraint" in str(insert_error):
-                        logger.warning(f"Duplicate emails detected, skipping batch")
-                        return {"successful": 0, "errors": ["Duplicate emails detected"]}
-                    else:
-                        raise insert_error
+                    batch_data.append(email)
+                    await self._process_email_embeddings(email)
+                except Exception as e:
+                    return ApiResponse(
+                        success=False,
+                        message=f"Error processing email {email.email_id}: {str(e)}"
+                    )
             
-            return {"successful": 0, "errors": []}
+            # Sync to Supabase
+            if batch_data:
+                try:
+                    # Convert Email dataclass objects to dictionaries for Supabase
+                    batch_dicts = [dataclass_to_dict(email) for email in batch_data]
+                    
+                    response = self.supabase.supabase.table("emails").insert(batch_dicts).execute()
+                except Exception as insert_error:
+                    return ApiResponse(
+                        success=False,
+                        message=f"Supabase insert error: {str(insert_error)}"
+                    )
+            
+            return ApiResponse(
+                success=True,
+                message="Emails synced to Supabase and Pinecone"
+            )
             
         except Exception as e:
-            logger.error(f"Error syncing batch to Supabase: {e}")
-            return {"successful": 0, "errors": [str(e)]}
+            logger.error(f"Error syncing batch to Supabase and Pinecone: {e}")
+            return ApiResponse(
+                success=False,
+                message=str(e)
+            )
     
     # ==================== Embedding Methods ====================
     
-    async def store_email_embeddings(
-        self, 
-        user_id: str, 
-        max_emails: int = 50
-    ) -> Dict[str, Any]:
-        """Store email embeddings in Pinecone."""
+    async def _process_email_embeddings(self, email: Email) -> ApiResponse:
+        """Process and store embeddings for a single email."""
         try:
-            # Get unprocessed emails from Supabase
-            unprocessed_emails = await self._get_unprocessed_emails(user_id, max_emails)
+            # Create searchable text
+            email_text = self._create_email_text(email)
+            if not email_text.strip():
+                return ApiResponse(
+                    success=True,
+                    message=f"No email text found for {email.email_id}"
+                )
             
-            if not unprocessed_emails:
-                return {
-                    "success": True,
-                    "message": "No unprocessed emails found",
-                    "processed": 0
-                }
+            chunks = self.text_chunking_service.chunk_text(email_text, max_chunk_size=1000, overlap=100)
             
-            successful = 0
-            errors = []
+            # Store each chunk
+            for i, chunk in enumerate(chunks):
+                result = await self._store_chunk_embedding(
+                    chunk=chunk,
+                    email=email
+                )
+                if not result.success:
+                    return result
             
-            for email in unprocessed_emails:
-                try:
-                    # Create searchable text
-                    email_text = self._create_email_text(email)
-                    if not email_text.strip():
-                        continue
-                    
-                    # Chunk the email content
-                    chunks = self.text_chunking_service.chunk_text(email_text, max_chunk_size=1000, overlap=100)
-                    
-                    # Store each chunk
-                    for i, chunk in enumerate(chunks):
-                        await self._store_chunk_embedding(
-                            email_id=email['email_id'],
-                            user_id=user_id,
-                            chunk_index=i,
-                            chunk_text=str(chunk),
-                            email_metadata=email
-                        )
-                    
-                    # Mark email as processed
-                    await self._mark_email_processed(email['email_id'], user_id)
-                    successful += 1
-                    
-                except Exception as e:
-                    errors.append(f"Error processing email {email.get('email_id')}: {str(e)}")
-            
-            return {
-                "success": True,
-                "processed": successful,
-                "errors": errors
-            }
-            
+            return ApiResponse(
+                success=True,
+                message=f"Successfully processed {len(chunks)} chunks for email {email.email_id}"
+            )
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            logger.error(f"Error processing email embeddings for {email.email_id}: {e}")
+            return ApiResponse(
+                success=False,
+                message=f"Error processing email embeddings for {email.email_id}: {e}"
+            )
     
-    async def _get_unprocessed_emails(self, user_id: str, max_emails: int) -> List[Dict[str, Any]]:
-        """Get unprocessed emails from Supabase."""
-        try:
-            user = await self.supabase.get_user_by_email(user_id)
-            if not user:
-                return []
-            
-            response = self.supabase.supabase.table("emails").select("*").eq("user_id", user['id']).eq("processed", False).limit(max_emails).execute()
-            return response.data if response.data else []
-            
-        except Exception as e:
-            logger.error(f"Error getting unprocessed emails: {e}")
-            return []
-    
-    def _create_email_text(self, email: Dict[str, Any]) -> str:
+    def _create_email_text(self, email: Email) -> str:
         """Create searchable text from email data."""
-        parts = []
-        
-        if email.get('subject'):
-            parts.append(f"Subject: {email['subject']}")
-        
-        if email.get('content'):
-            parts.append(f"Content: {email['content'][:8000]}")
-        
-        return "\n".join(parts)
+        return email.content
     
     async def _store_chunk_embedding(
         self, 
-        email_id: str, 
-        user_id: str, 
-        chunk_index: int, 
-        chunk_text: str,
-        email_metadata: Dict[str, Any]
-    ):
+        chunk: Chunk,
+        email: Email
+    ) -> ApiResponse:
         """Store a single chunk embedding in Pinecone."""
         try:
             # Generate embedding
-            embedding = self.vector_store.get_embedding(chunk_text)
+            embedding = self.vector_store.get_embedding(chunk.chunk_text)
             
             # Create vector ID
-            vector_id = f"email_{user_id}_{email_id}_chunk_{chunk_index}"
+            vector_id = f"email_{email.email_id}_chunk_{chunk.chunk_id}"
             
-            # Create vector data
+            # Create vector data for Pinecone (must be a dictionary)
             vector_data = {
                 "id": vector_id,
                 "values": embedding,
                 "metadata": {
-                    "email_id": email_id,
-                    "user_id": user_id,
-                    "chunk_index": chunk_index,
-                    "type": "email_chunk",
-                    "subject": email_metadata.get('subject', ''),
-                    "content_preview": chunk_text[:200] + "..." if len(chunk_text) > 200 else chunk_text,
-                    "word_count": len(chunk_text.split())
+                    "email_id": email.email_id,
+                    "chunk_id": chunk.chunk_id,
+                    "chunk_text": chunk.chunk_text,
+                    "chunk_type": chunk.chunk_type,
+                    "type": "email_chunk"
                 }
             }
             
             # Store in Pinecone
             self.vector_store.add_documents([vector_data])
-            
+
+            return ApiResponse(
+                success=True,
+                message=f"Chunk embedding stored for {email.email_id}"
+            )
         except Exception as e:
             logger.error(f"Error storing chunk embedding: {e}")
-            raise
-    
-    async def _mark_email_processed(self, email_id: str, user_id: str):
-        """Mark email as processed in Supabase."""
-        try:
-            user = await self.supabase.get_user_by_email(user_id)
-            if not user:
-                return
-            
-            self.supabase.supabase.table("emails").update({"processed": True}).eq("email_id", email_id).eq("user_id", user['id']).execute()
-            
-        except Exception as e:
-            logger.error(f"Error marking email as processed: {e}")
-    
-    # ==================== Search Methods ====================
-    
-    async def search_emails(
-        self, 
-        query: str, 
-        user_id: str, 
-        top_k: int = 5
-    ) -> List[Dict[str, Any]]:
-        """Search emails using vector similarity."""
-        try:
-            # Generate query embedding
-            query_embedding = self.vector_store.get_embedding(query)
-            
-            # Search in Pinecone
-            search_results = self.vector_store.search(
-                embedding=query_embedding,
-                top_k=top_k,
-                filter={"user_id": user_id}
+            return ApiResponse(
+                success=False,
+                message=f"Error storing chunk embedding: {e}"
             )
-            
-            # Process results
-            results = []
-            try:
-                matches = search_results.matches if hasattr(search_results, 'matches') else []
-                for match in matches:
-                    if hasattr(match, 'metadata') and match.metadata:
-                        results.append({
-                            "email_id": match.metadata.get("email_id"),
-                            "chunk_index": match.metadata.get("chunk_index"),
-                            "subject": match.metadata.get("subject"),
-                            "content_preview": match.metadata.get("content_preview"),
-                            "similarity_score": getattr(match, 'score', 0.0)
-                        })
-            except Exception as e:
-                logger.warning(f"Error processing search results: {e}")
-            
-            return results
-            
-        except Exception as e:
-            logger.error(f"Error searching emails: {e}")
-            return []
     
-    # ==================== Statistics Methods ====================
+    # ==================== Clear/Delete Methods ====================    
     
-    async def get_email_stats(self, user_id: str) -> Dict[str, Any]:
-        """Get email statistics for a user."""
+    async def clear_all_email_embeddings(self) -> Dict[str, Any]:
+        """Clear ALL email embeddings from Pinecone (admin function)"""
         try:
-            user = await self.supabase.get_user_by_email(user_id)
-            if not user:
-                return {"error": f"User {user_id} not found"}
-            
-            # Get stats from Supabase
-            response = self.supabase.supabase.table("emails").select("*").eq("user_id", user['id']).execute()
-            
-            if response.data:
-                total_emails = len(response.data)
-                processed_emails = sum(1 for email in response.data if email.get('processed', False))
-                unprocessed_emails = total_emails - processed_emails
-                
+            success = self.vector_store.delete_all_vectors()
+            if success:
                 return {
-                    "total_emails": total_emails,
-                    "processed_emails": processed_emails,
-                    "unprocessed_emails": unprocessed_emails,
-                    "last_sync": max(email.get('created_at', '') for email in response.data) if response.data else None
+                    "success": True,
+                    "message": "Successfully cleared all email embeddings from Pinecone"
                 }
             else:
                 return {
-                    "total_emails": 0,
-                    "processed_emails": 0,
-                    "unprocessed_emails": 0,
-                    "last_sync": None
+                    "success": False,
+                    "error": "Failed to clear embeddings from Pinecone"
                 }
                 
         except Exception as e:
-            logger.error(f"Error getting email stats: {e}")
-            return {"error": str(e)} 
+            logger.error(f"Error clearing all email embeddings: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }

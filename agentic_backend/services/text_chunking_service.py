@@ -3,9 +3,12 @@ Simple Text Chunking Service
 Splits text into logical chunks for processing.
 """
 
+import hashlib
 import logging
 import re
 from typing import List, Dict, Any
+
+from agentic_backend.types.schema import Chunk
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +19,7 @@ class TextChunkingService:
     def __init__(self):
         pass
         
-    def chunk_text(self, text: str, max_chunk_size: int = 1000, overlap: int = 100) -> List[Dict[str, Any]]:
+    def chunk_text(self, text: str, max_chunk_size: int = 1000, overlap: int = 100) -> List[Chunk]:
         """
         Split text into logical chunks.
         
@@ -37,7 +40,7 @@ class TextChunkingService:
         # Split into sentences first (more logical than word-based)
         sentences = self._split_into_sentences(text)
         
-        chunks = []
+        chunks: List[Chunk] = []
         current_chunk = []
         current_word_count = 0
         
@@ -49,11 +52,12 @@ class TextChunkingService:
             if current_word_count + sentence_word_count > max_chunk_size and current_chunk:
                 # Save current chunk
                 chunk_text = " ".join(current_chunk)
-                chunks.append({
-                    "content": chunk_text,
-                    "word_count": current_word_count,
-                    "chunk_type": "sentence_based"
-                })
+                chunk_id = hashlib.sha256(chunk_text.encode()).hexdigest()
+                chunks.append(Chunk(
+                        chunk_type="sentence_based",
+                        chunk_id=chunk_id,
+                        chunk_text=chunk_text,
+                ))
                 
                 # Start new chunk with overlap
                 if overlap > 0:
@@ -80,11 +84,12 @@ class TextChunkingService:
         # Add the last chunk if it has content
         if current_chunk:
             chunk_text = " ".join(current_chunk)
-            chunks.append({
-                "content": chunk_text,
-                "word_count": current_word_count,
-                "chunk_type": "sentence_based"
-            })
+            chunk_id = hashlib.sha256(chunk_text.encode()).hexdigest()
+            chunks.append(Chunk(
+                chunk_type="sentence_based",
+                chunk_id=chunk_id,
+                chunk_text=chunk_text,
+            ))
         
         return chunks
     

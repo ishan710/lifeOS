@@ -1,5 +1,6 @@
 from supabase import create_client, Client
 from agentic_backend.config.settings import settings
+from agentic_backend.types.schema import User
 from typing import List, Dict, Any, Optional
 
 class SupabaseService:
@@ -100,18 +101,36 @@ class SupabaseService:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    async def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+    async def get_user_by_email(self, email: str) -> User:
         """Get user by email"""
         try:
             response = self.supabase.table("users").select("*").eq("email", email).execute()
-            return response.data[0] if response.data else None
+            return User(
+                id=response.data[0]['id'], 
+                email=response.data[0]['email'],
+                user_name=response.data[0]['user_name'],
+                created_at=response.data[0]['created_at']
+            ) if response.data else None
         except Exception as e:
             return None
 
-    async def get_user_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
+    async def get_user_by_id(self, user_id: str) -> Optional[User]:
         """Get user by ID"""
+        response = self.supabase.table("users").select("*").eq("id", user_id).execute()
+        if response.data:
+            return User(
+                id=response.data[0]['id'], 
+                email=response.data[0]['email'],
+                    user_name=response.data[0]['user_name'],
+                    created_at=response.data[0]['created_at']
+                )
+        else:
+            return None
+    
+    async def get_emails_by_ids(self, email_ids: List[str]) -> List[Dict[str, Any]]:
+        """Get emails by IDs"""
         try:
-            response = self.supabase.table("users").select("*").eq("id", user_id).execute()
-            return response.data[0] if response.data else None
+            response = self.supabase.table("emails").select("*").in_("email_id", email_ids).execute()
+            return response.data if response.data else []
         except Exception as e:
-            return None 
+            return []

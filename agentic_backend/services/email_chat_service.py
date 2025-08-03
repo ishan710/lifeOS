@@ -7,6 +7,7 @@ import logging
 import os
 from typing import List, Dict, Any, Optional
 from agentic_backend.vector_store import VectorStore
+from agentic_backend.services.supabase_service import SupabaseService
 from langchain_openai import ChatOpenAI
 from langchain.schema import HumanMessage, SystemMessage
 from langchain.prompts import ChatPromptTemplate
@@ -19,12 +20,13 @@ class ChatService:
     
     def __init__(self):
         self.vector_store = VectorStore()
+        self.supabase = SupabaseService()
         self.llm = ChatOpenAI(
             model="gpt-3.5-turbo",
-            temperature=0.7
+            temperature=0.1
         )
         
-    async def ask_question(self, user_id: str, question: str, content_type: str = "all", max_context_items: int = 5) -> Dict[str, Any]:
+    async def ask_question(self, user_id: str, question: str, content_type: str = "all", max_context_items: int = 25) -> Dict[str, Any]:
         """
         Ask a question about any content and get an AI-generated answer.
         
@@ -57,8 +59,11 @@ class ChatService:
                 }
             
             # Step 2: Prepare context from relevant items
-            context = self._prepare_context(relevant_items, content_type)
-            
+            email_ids = [item["metadata"]["email_id"] for item in relevant_items]
+            emails = await self._get_emails(email_ids)
+            print("emails", emails)
+            context = self._prepare_context(emails, content_type)
+            print("context", context)
             # Step 3: Generate answer using LLM
             answer = await self._generate_answer(question, context, user_id, content_type)
             
@@ -110,7 +115,7 @@ class ChatService:
                 matches = search_results["matches"]
                 for match in matches:
                         items.append({
-                            "id": getattr(match, 'id', ''),
+                            "email_id": getattr(match, 'email_id', ''),
                             "content": match.metadata.get("content", ""),
                             "similarity_score": getattr(match, 'score', 0.0),
                             "metadata": match.metadata,
@@ -125,7 +130,14 @@ class ChatService:
         except Exception as e:
             logger.error(f"Failed to search content: {e}")
             return []
-    
+
+    async def _get_emails(self, email_ids: List[str]) -> List[Dict[str, Any]]:
+        """
+        Get emails for a user.
+        """
+        search_results = await self.supabase.get_emails_by_ids(email_ids)
+        return search_results
+
     def _prepare_context(self, items: List[Dict[str, Any]], content_type: str) -> str:
         """
         Prepare context from search results for the LLM.
@@ -138,29 +150,8 @@ class ChatService:
             Formatted context string
         """
         context_parts = []
-        
-        for i, item in enumerate(items, 1):
-            item_type = item.get('type', content_type)
-            
-            # Format based on content type
-            if item_type == "email":
-                context_block = f"""
-Email {i}:
-- Subject: {item.get('metadata', {}).get('subject', 'No subject')}
-- From: {item.get('metadata', {}).get('from', 'Unknown sender')}
-- Date: {item.get('metadata', {}).get('date', 'Unknown date')}
-- Relevance Score: {item.get('similarity_score', 0):.2f}
-- Content: {item.get('content', 'No content available')}
-"""
-            else:
-                context_block = f"""
-{item_type.title()} {i}:
-- Type: {item_type}
-- Relevance Score: {item.get('similarity_score', 0):.2f}
-- Content: {item.get('content', 'No content available')}
-"""
-            context_parts.append(context_block)
-        
+        for item in items:
+            context_parts.append(item["content"])
         return "\n".join(context_parts)
     
     async def _generate_answer(self, question: str, context: str, user_id: str, content_type: str) -> str:
@@ -177,23 +168,14 @@ Email {i}:
             Generated answer
         """
         if not context.strip():
-            return f"I couldn't find any relevant {content_type} to answer your question. Please try rephrasing or check if you have content indexed."
+            return f"I couldn't find any relevant emails to answer your question. Please try rephrasing or check if you have content indexed."
         
         try:
             # Create system prompt with context
-            system_prompt = f"""You are an AI assistant helping a user understand their {content_type}. 
-You have access to relevant {content_type} context to answer their questions.
+            system_prompt = f"""You are an AI assistant helping a user understand their emails. 
+You have access to relevant emails to answer their questions.
 
-Guidelines:
-1. Answer based ONLY on the provided {content_type} context
-2. Be concise but informative
-3. If the context doesn't contain enough information, say so
-4. Reference specific {content_type} items when relevant
-5. Be helpful and professional
-6. Don't make up information not present in the context
-7. Format your response in a clear, readable way
-
-{content_type.title()} Context:
+Emails Context:
 {context}
 
 User Question: {question}
@@ -207,7 +189,8 @@ Please provide a helpful answer based on the {content_type} context above."""
             ]
             
             response = await self.llm.ainvoke(messages)
-            
+
+            # print("response", response)
             return str(response.content)
             
         except Exception as e:

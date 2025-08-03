@@ -213,7 +213,8 @@ async def get_emails(
 ):
     """Get emails from Gmail"""
     try:
-        emails = await email_service.get_emails(user_id, query, max_results)
+        user = await supabase_service.get_user_by_id(user_id)
+        emails = await email_service.get_new_emails(user, query, max_results)
         return {"emails": emails}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch emails: {str(e)}")
@@ -236,8 +237,9 @@ async def get_email_count(user_id: str = Query(..., description="User ID")):
             return {"error": "No Gmail credentials found"}
         
         # Get emails with different queries to show counts
-        all_emails = await email_service.get_emails(user_id, query="", max_results=50)
-        unread_emails = await email_service.get_emails(user_id, query="is:unread", max_results=20)
+        user = await supabase_service.get_user_by_id(user_id)
+        all_emails = await email_service.get_new_emails(user, query="", max_results=50)
+        unread_emails = await email_service.get_new_emails(user, query="is:unread", max_results=20)
         
         return {
             "recent_emails_count": len(all_emails),
@@ -250,29 +252,6 @@ async def get_email_count(user_id: str = Query(..., description="User ID")):
 
 # Email Embedding & RAG Endpoints
 
-@router.post("/emails/embeddings/store")
-async def store_email_embeddings(user_id: str = Query(...), max_emails: int = Query(default=50)):
-    """Store email embeddings in Pinecone for RAG"""
-    try:
-        # Get recent emails from Gmail
-        emails = await email_service.get_emails(user_id, query="", max_results=max_emails)
-        
-        if not emails:
-            return {"success": False, "message": "No emails found to process - check Gmail credentials"}
-        
-        # Store embeddings using unified service
-        results = await email_service.store_email_embeddings(user_id, max_emails)
-        
-        return {
-            "success": True,
-            "message": f"Processed {len(emails)} emails",
-            "results": results,
-            "sample_email": emails[0] if emails else None  # Show first email for debugging
-        }
-        
-    except Exception as e:
-        return {"success": False, "error": str(e), "message": "Check Gmail credentials and try signing in again"}
-
 @router.get("/emails/embeddings/search")
 async def search_email_embeddings(
     query: str = Query(..., description="Natural language search query"),
@@ -282,7 +261,6 @@ async def search_email_embeddings(
     """Search emails using natural language query"""
     try:
         results = await email_service.search_emails(query, user_id, top_k)
-        print("DEBUG: results =", results)
         
         return {
             "success": True,
@@ -294,41 +272,6 @@ async def search_email_embeddings(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Email search failed: {str(e)}")
 
-@router.get("/emails/embeddings/stats")
-async def get_email_embedding_stats(user_id: str = Query(...)):
-    """Get statistics about stored email embeddings"""
-    try:
-        stats = await email_service.get_email_stats(user_id)
-        return stats
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get email stats: {str(e)}")
-
-@router.post("/emails/embeddings/sync")
-async def sync_email_embeddings(user_id: str = Query(...)):
-    """Sync latest emails to embeddings (incremental update)"""
-    try:
-        # Get recent emails (last 20)
-        recent_emails = await email_service.get_emails(user_id, query="", max_results=20)
-        
-        if recent_emails:
-            results = await email_service.store_email_embeddings(user_id, 20)
-            return {
-                "success": True,
-                "message": "Email embeddings synced",
-                "results": results
-            }
-        else:
-            return {
-                "success": True,
-                "message": "No new emails to sync",
-                "results": {"success": 0, "failed": 0}
-            }
-            
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Email sync failed: {str(e)}")
-
-
 # Chat & AI Endpoints
 
 @router.post("/chat/ask")
@@ -339,7 +282,7 @@ async def ask_question(request: Request):
         user_id = data.get("user_id", "")
         question = data.get("question", "")
         content_type = data.get("content_type", "all")
-        max_context_items = data.get("max_context_items", 5)
+        max_context_items = data.get("max_context_items", 25)
         
         if not user_id or not question:
             return {"success": False, "error": "Missing required fields: user_id, question"}
@@ -361,82 +304,48 @@ async def ask_question(request: Request):
 
 @router.post("/emails/sync")
 async def sync_emails(request: Request):
-    """Sync user emails to Supabase and Pinecone"""
+    """Sync user emails to Supabase and Pinecone in one operation"""
     try:
         data = await request.json()
         user_id = data.get("user_id", "")
         max_emails = data.get("max_emails", 50)
         batch_size = data.get("batch_size", 10)
+        start_date = data.get("start_date", None)
+        end_date = data.get("end_date", None)
         
         if not user_id:
             return {"success": False, "error": "Missing required field: user_id"}
         
-        result = await email_service.sync_emails_to_supabase(
-            user_id=user_id,
+        # Get user object first
+        user = await email_service.supabase.get_user_by_email(user_id)
+        if not user:
+            return {"success": False, "error": f"User {user_id} not found"}
+
+        result = await email_service.sync_emails(
+            user=user,
             max_emails=max_emails,
-            batch_size=batch_size
+            batch_size=batch_size,
+            start_date=start_date,
+            end_date=end_date
         )
         
-        if result.get("success"):
-            return {
-                "success": True,
-                "result": {
-                    "new_emails_count": result.get("new_emails", 0),
-                    "total_emails_count": result.get("total_emails", 0),
-                    "indexed_emails_count": result.get("synced_to_supabase", 0),
-                    "message": result.get("message", "Sync completed successfully")
-                }
-            }
-        else:
-            return result
-        
+        return {
+            "success": result.success,
+            "message": result.message,
+            "errors": getattr(result, 'errors', [])
+        }
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Email sync failed: {str(e)}")
 
 
-@router.get("/emails/sync/stats")
-async def get_sync_stats(user_id: str = Query(...)):
-    """Get email sync statistics for a user"""
+@router.post("/emails/clear-embeddings")
+async def clear_all_email_embeddings(request: Request):
+    """Clear ALL email embeddings from Pinecone (admin function)"""
     try:
-        stats = await email_service.get_email_stats(user_id)
-        
-        # Transform stats to match frontend expectations
-        if "error" not in stats:
-            return {
-                "success": True,
-                "total_emails_count": stats.get("total_emails", 0),
-                "new_emails_count": stats.get("unprocessed_emails", 0),
-                "unprocessed_emails_count": stats.get("unprocessed_emails", 0),
-                "last_sync_date": stats.get("last_sync")
-            }
-        else:
-            return {
-                "success": False,
-                "error": stats.get("error", "Failed to get stats")
-            }
+        result = await email_service.clear_all_email_embeddings()
+        return result
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get sync stats: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to clear embeddings: {str(e)}")
 
-
-@router.post("/emails/mark-processed")
-async def mark_email_processed(request: Request):
-    """Mark an email as processed"""
-    try:
-        data = await request.json()
-        email_id = data.get("email_id", "")
-        user_id = data.get("user_id", "")
-        
-        if not email_id or not user_id:
-            return {"success": False, "error": "Missing required fields: email_id, user_id"}
-        
-        success = await email_service._mark_email_processed(email_id, user_id)
-        
-        return {
-            "success": success,
-            "email_id": email_id,
-            "user_id": user_id
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to mark email as processed: {str(e)}")
