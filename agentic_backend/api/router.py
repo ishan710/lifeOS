@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Request, HTTPException, Query
+from pydantic.type_adapter import P
 # from agentic_backend.core.orchestrator import handle_user_input
 from agentic_backend.vector_store import VectorStore
 from agentic_backend.services.supabase_service import SupabaseService
@@ -286,14 +287,13 @@ async def ask_question(request: Request):
         
         if not user_id or not question:
             return {"success": False, "error": "Missing required fields: user_id, question"}
-        
         result = await chat_service.ask_question(
             user_id=user_id,
             question=question,
             content_type=content_type,
             max_context_items=max_context_items
         )
-        
+        print("DEBUG: result =", result)
         return result
         
     except Exception as e:
@@ -339,6 +339,28 @@ async def sync_emails(request: Request):
         raise HTTPException(status_code=500, detail=f"Email sync failed: {str(e)}")
 
 
+@router.get("/emails/embeddings/stats")
+async def get_email_embedding_stats(user_id: str = Query(...)):
+    """Get statistics about stored email embeddings"""
+    try:
+        result = await email_service.get_embedding_stats(user_id)
+        return result
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get embedding stats: {str(e)}")
+
+
+@router.get("/emails/sync/stats")
+async def get_email_sync_stats(user_id: str = Query(...)):
+    """Get email sync statistics"""
+    try:
+        result = await email_service.get_sync_stats(user_id)
+        return result
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get sync stats: {str(e)}")
+
+
 @router.post("/emails/clear-embeddings")
 async def clear_all_email_embeddings(request: Request):
     """Clear ALL email embeddings from Pinecone (admin function)"""
@@ -348,4 +370,22 @@ async def clear_all_email_embeddings(request: Request):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to clear embeddings: {str(e)}")
+
+
+@router.post("/emails/clear-supabase")
+async def clear_user_supabase_data(request: Request):
+    """Clear all email data for a user from Supabase"""
+    try:
+        data = await request.json()
+        user_id = data.get("user_id", "")
+        
+        if not user_id:
+            return {"success": False, "error": "Missing required field: user_id"}
+        
+        result = await email_service.clear_user_supabase_data(user_id)
+        return result
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to clear Supabase data: {str(e)}")
+
 

@@ -1,9 +1,5 @@
 "use client";
 import { useState, useEffect } from "react";
-import NoteInput from "../components/NoteInput";
-import TaskDashboard from "../components/TaskDashboard";
-import IdeaList from "../components/IdeaList";
-import EmailViewer from "../components/EmailViewer";
 import GoogleLogin from "../components/GoogleLogin";
 import EmailRAG from "../components/EmailRAG";
 
@@ -16,7 +12,6 @@ interface User {
 }
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<"input" | "tasks" | "ideas" | "gmail" | "search">("input");
   const [user, setUser] = useState<User | null>(null);
 
   // Load saved user on component mount
@@ -34,8 +29,6 @@ export default function Home() {
     }
   }, []);
 
-
-
   const handleLogin = (userData: User) => {
     setUser(userData);
   };
@@ -51,248 +44,203 @@ export default function Home() {
   return (
     <div style={{ 
       minHeight: '100vh',
-      backgroundColor: '#fafafa',
-      fontFamily: '"Google Sans", "Roboto", Arial, sans-serif'
+      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      fontFamily: '"Inter", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      position: 'relative'
     }}>
+      {/* Background Pattern */}
+      <div style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundImage: 'radial-gradient(circle at 25% 25%, rgba(255,255,255,0.1) 0%, transparent 50%), radial-gradient(circle at 75% 75%, rgba(255,255,255,0.1) 0%, transparent 50%)',
+        pointerEvents: 'none'
+      }} />
+
       {/* Header */}
       <header style={{
-        backgroundColor: '#fff',
-        borderBottom: '1px solid #e0e0e0',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24)',
-        padding: '16px 0',
-        marginBottom: '24px'
+        backgroundColor: 'rgba(255, 255, 255, 0.95)',
+        backdropFilter: 'blur(20px)',
+        borderBottom: '1px solid rgba(255, 255, 255, 0.2)',
+        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
+        padding: '24px 0',
+        marginBottom: '40px',
+        position: 'relative',
+        zIndex: 10
       }}>
-        <div style={{ maxWidth: 1200, margin: "0 auto", padding: '0 24px' }}>
+        <div style={{ maxWidth: 1200, margin: "0 auto", padding: '0 32px' }}>
           <h1 style={{ 
             textAlign: "center", 
             margin: 0,
-            fontSize: '32px',
-            fontWeight: '400',
-            color: '#1f1f1f',
-            letterSpacing: '-0.5px'
+            fontSize: '42px',
+            fontWeight: '700',
+            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            backgroundClip: 'text',
+            letterSpacing: '-1px',
+            textShadow: '0 2px 4px rgba(0,0,0,0.1)'
           }}>LifeOS</h1>
+          <p style={{
+            textAlign: 'center',
+            margin: '8px 0 0 0',
+            fontSize: '16px',
+            color: '#6b7280',
+            fontWeight: '400',
+            letterSpacing: '0.5px'
+          }}>AI-Powered Email Intelligence</p>
         </div>
       </header>
 
-      <div style={{ maxWidth: 1200, margin: "0 auto", padding: '0 24px' }}>
+      <div style={{ maxWidth: 1200, margin: "0 auto", padding: '0 32px', position: 'relative', zIndex: 5 }}>
         {/* Authentication Section */}
         {user ? (
         <div style={{ 
           textAlign: "center", 
-          marginBottom: 32,
-          backgroundColor: '#fff',
-          borderRadius: '12px',
-          padding: '24px',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24)'
+          marginBottom: 40,
+          backgroundColor: 'rgba(255, 255, 255, 0.95)',
+          backdropFilter: 'blur(20px)',
+          borderRadius: '20px',
+          padding: '32px',
+          boxShadow: '0 20px 40px rgba(0, 0, 0, 0.1), 0 8px 16px rgba(0, 0, 0, 0.05)',
+          border: '1px solid rgba(255, 255, 255, 0.2)',
+          position: 'relative',
+          overflow: 'hidden'
         }}>
-          <div style={{ marginBottom: 16 }}>
-              <strong>Welcome, {user.name}!</strong>
-              <div style={{ fontSize: 14, color: '#5f6368' }}>{user.email}</div>
+          {/* Decorative elements */}
+          <div style={{
+            position: 'absolute',
+            top: -20,
+            right: -20,
+            width: 100,
+            height: 100,
+            background: 'linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%)',
+            borderRadius: '50%',
+            filter: 'blur(20px)'
+          }} />
+          
+          <div style={{ marginBottom: 20, position: 'relative' }}>
+              <div style={{
+                fontSize: '20px',
+                fontWeight: '600',
+                color: '#1f2937',
+                marginBottom: '8px'
+              }}>
+                Welcome back, {user.name}! 👋
+              </div>
+              <div style={{ 
+                fontSize: 15, 
+                color: '#6b7280',
+                fontWeight: '500',
+                letterSpacing: '0.3px'
+              }}>
+                {user.email}
+              </div>
           </div>
           
             <button
               onClick={handleLogout}
                 style={{ 
-                padding: "8px 16px",
-                backgroundColor: "#dc3545",
+                padding: "12px 24px",
+                backgroundColor: "rgba(239, 68, 68, 0.9)",
                 color: "white",
                 border: "none",
-                borderRadius: '6px',
+                borderRadius: '12px',
                 cursor: "pointer",
                 fontSize: '14px',
-                fontWeight: '500'
+                fontWeight: '600',
+                transition: 'all 0.3s ease',
+                boxShadow: '0 4px 12px rgba(239, 68, 68, 0.3)',
+                letterSpacing: '0.5px'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-2px)';
+                  e.currentTarget.style.boxShadow = '0 6px 20px rgba(239, 68, 68, 0.4)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = '0 4px 12px rgba(239, 68, 68, 0.3)';
                 }}
             >
               Sign Out
             </button>
             </div>
         ) : (
-          <GoogleLogin onLogin={handleLogin} />
+          <div style={{
+            backgroundColor: 'rgba(255, 255, 255, 0.95)',
+            backdropFilter: 'blur(20px)',
+            borderRadius: '20px',
+            padding: '40px',
+            boxShadow: '0 20px 40px rgba(0, 0, 0, 0.1), 0 8px 16px rgba(0, 0, 0, 0.05)',
+            border: '1px solid rgba(255, 255, 255, 0.2)',
+            textAlign: 'center'
+          }}>
+            <GoogleLogin onLogin={handleLogin} />
+          </div>
           )}
 
         {/* App Content - Only show when user is logged in */}
         {user && (
-          <>
-        {/* Tab navigation */}
-        <div style={{ 
-          display: "flex", 
-          justifyContent: "center", 
-          marginBottom: 32,
-          backgroundColor: '#fff',
-          borderRadius: '12px',
-          padding: '8px',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24)',
-          width: 'fit-content',
-          margin: '0 auto 32px auto'
-        }}>
-          <button
-            onClick={() => setActiveTab("input")}
-            style={{
-              padding: "12px 24px",
-              margin: "0 4px",
-              border: "none",
-              borderRadius: '8px',
-              backgroundColor: activeTab === "input" ? "#1a73e8" : "transparent",
-              color: activeTab === "input" ? "white" : "#5f6368",
-              cursor: "pointer",
-              fontFamily: 'inherit',
-              fontSize: '14px',
-              fontWeight: '500',
-              transition: 'all 0.2s',
-              minWidth: '100px'
-            }}
-          >
-            Add Note
-          </button>
-          <button
-            onClick={() => setActiveTab("tasks")}
-            style={{
-              padding: "12px 24px",
-              margin: "0 4px",
-              border: "none",
-              borderRadius: '8px',
-              backgroundColor: activeTab === "tasks" ? "#1a73e8" : "transparent",
-              color: activeTab === "tasks" ? "white" : "#5f6368",
-              cursor: "pointer",
-              fontFamily: 'inherit',
-              fontSize: '14px',
-              fontWeight: '500',
-              transition: 'all 0.2s',
-              minWidth: '100px'
-            }}
-          >
-            View Tasks
-          </button>
-          <button
-            onClick={() => setActiveTab("ideas")}
-            style={{
-              padding: "12px 24px",
-              margin: "0 4px",
-              border: "none",
-              borderRadius: '8px',
-              backgroundColor: activeTab === "ideas" ? "#1a73e8" : "transparent",
-              color: activeTab === "ideas" ? "white" : "#5f6368",
-              cursor: "pointer",
-              fontFamily: 'inherit',
-              fontSize: '14px',
-              fontWeight: '500',
-              transition: 'all 0.2s',
-              minWidth: '100px'
-            }}
-          >
-            View Ideas
-          </button>
-          <button
-            onClick={() => setActiveTab("gmail")}
-            style={{
-              padding: "12px 24px",
-              margin: "0 4px",
-              border: "none",
-              borderRadius: '8px',
-              backgroundColor: activeTab === "gmail" ? "#1a73e8" : "transparent",
-              color: activeTab === "gmail" ? "white" : "#5f6368",
-              cursor: "pointer",
-              fontFamily: 'inherit',
-              fontSize: '14px',
-              fontWeight: '500',
-              transition: 'all 0.2s',
-              minWidth: '100px'
-            }}
-          >
-            📧 Gmail
-          </button>
-          <button
-            onClick={() => setActiveTab("search")}
-            style={{
-              padding: "12px 24px",
-              margin: "0 4px",
-              border: "none",
-              borderRadius: '8px',
-              backgroundColor: activeTab === "search" ? "#1a73e8" : "transparent",
-              color: activeTab === "search" ? "white" : "#5f6368",
-              cursor: "pointer",
-              fontFamily: 'inherit',
-              fontSize: '14px',
-              fontWeight: '500',
-              transition: 'all 0.2s',
-              minWidth: '100px'
-            }}
-          >
-            🔍 AI Search
-          </button>
-        </div>
-
-        {/* Tab content */}
-        <div style={{
-          backgroundColor: '#fff',
-          borderRadius: '12px',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24)',
-          overflow: 'hidden',
-          minHeight: '400px'
-        }}>
-          {activeTab === "input" ? (
-            <NoteInput />
-          ) : activeTab === "tasks" ? (
-            effectiveUserName ? (
-              <TaskDashboard userName={effectiveUserName} />
-            ) : (
-              <div style={{ 
-                textAlign: "center", 
-                padding: 48,
-                color: '#5f6368',
-                fontSize: '16px'
-              }}>
-                <div style={{ fontSize: '48px', marginBottom: '16px' }}>👤</div>
-                <p>Please enter your name above to view tasks.</p>
-              </div>
-            )
-          ) : activeTab === "ideas" ? (
-            effectiveUserName ? (
-              <IdeaList userName={effectiveUserName} />
-            ) : (
-              <div style={{ 
-                textAlign: "center", 
-                padding: 48,
-                color: '#5f6368',
-                fontSize: '16px'
-              }}>
-                <div style={{ fontSize: '48px', marginBottom: '16px' }}>💡</div>
-                <p>Please enter your name above to view ideas.</p>
-              </div>
-            )
-          ) : activeTab === "gmail" ? (
-            // Gmail tab
-            userId ? (
-              <EmailViewer userId={userId} />
-            ) : (
-              <div style={{ 
-                textAlign: "center", 
-                padding: 48,
-                color: '#5f6368',
-                fontSize: '16px'
-              }}>
-                <div style={{ fontSize: '48px', marginBottom: '16px' }}>📧</div>
-                <p>Please enter your name above to use Gmail integration.</p>
-              </div>
-            )
-          ) : (
-            // AI Search tab
-            userId ? (
-              <EmailRAG userId={userId} />
-            ) : (
-              <div style={{ 
-                textAlign: "center", 
-                padding: 48,
-                color: '#5f6368',
-                fontSize: '16px'
-              }}>
-                <div style={{ fontSize: '48px', marginBottom: '16px' }}>🔍</div>
-                <p>Please sign in to use AI email search.</p>
-              </div>
-            )
-          )}
-        </div>
-          </>
+          <div style={{
+            backgroundColor: 'rgba(255, 255, 255, 0.95)',
+            backdropFilter: 'blur(20px)',
+            borderRadius: '20px',
+            boxShadow: '0 20px 40px rgba(0, 0, 0, 0.1), 0 8px 16px rgba(0, 0, 0, 0.05)',
+            border: '1px solid rgba(255, 255, 255, 0.2)',
+            overflow: 'hidden',
+            minHeight: '500px',
+            position: 'relative'
+          }}>
+            {/* Decorative corner element */}
+            <div style={{
+              position: 'absolute',
+              top: 0,
+              right: 0,
+              width: 0,
+              height: 0,
+              borderStyle: 'solid',
+              borderWidth: '0 60px 60px 0',
+              borderColor: 'transparent rgba(102, 126, 234, 0.1) transparent transparent',
+              zIndex: 1
+            }} />
+            
+            {/* AI Search content */}
+            <div style={{ position: 'relative', zIndex: 2 }}>
+              {userId ? (
+                <EmailRAG userId={userId} />
+              ) : (
+                <div style={{ 
+                  textAlign: "center", 
+                  padding: 80,
+                  color: '#6b7280',
+                  fontSize: '18px'
+                }}>
+                  <div style={{ 
+                    fontSize: '64px', 
+                    marginBottom: '24px',
+                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                    backgroundClip: 'text'
+                  }}>🔍</div>
+                  <p style={{ 
+                    margin: '0 0 16px 0',
+                    fontSize: '20px',
+                    fontWeight: '600',
+                    color: '#1f2937'
+                  }}>AI Email Search</p>
+                  <p style={{ 
+                    margin: 0,
+                    fontSize: '16px',
+                    color: '#6b7280',
+                    lineHeight: '1.6'
+                  }}>Please sign in to access intelligent email search and analysis.</p>
+                </div>
+              )}
+            </div>
+          </div>
         )}
       </div>
     </div>

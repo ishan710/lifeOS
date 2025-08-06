@@ -220,7 +220,7 @@ class EmailService:
             email_id=message.get('id', ''),
             created_at=datetime.now(),
             email_timestamp=email_timestamp,
-            user_email_id=user.email,  # Use the user's email address
+            user_email_id=user.email, 
             content=body,
             sender=find_header('from'),
         )
@@ -233,15 +233,32 @@ class EmailService:
             """Clean and normalize text content."""
             if not text:
                 return ""
+            
+            # Remove email reply markers (>>>>>>>>>>>>>>>>>>>)
+            text = re.sub(r'^>+\s*', '', text, flags=re.MULTILINE)  # Remove leading > at start of lines
+            text = re.sub(r'\n>+\s*', '\n', text, flags=re.MULTILINE)  # Remove > at start of lines after newlines
+            text = re.sub(r'^>+\s*$', '', text, flags=re.MULTILINE)  # Remove lines that are only >
+            
+            # Remove common email reply patterns
+            text = re.sub(r'On .* wrote:$', '', text, flags=re.MULTILINE | re.IGNORECASE)
+            text = re.sub(r'From:.*\nSent:.*\nTo:.*\nSubject:.*', '', text, flags=re.MULTILINE | re.IGNORECASE)
+            text = re.sub(r'From:.*\nDate:.*\nTo:.*\nSubject:.*', '', text, flags=re.MULTILINE | re.IGNORECASE)
+            
+            # Remove HTML and CSS
             text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
             text = re.sub(r'[\.#][a-zA-Z0-9\-_]+\s*\{[^}]*\}', '', text)
             text = re.sub(r'[a-zA-Z\-]+:\s*[^;]+;', '', text)
             text = re.sub(r'@media[^{]*\{[^}]*\}', '', text, flags=re.DOTALL)
             text = re.sub(r'<[^>]+>', '', text)
+            
+            # Decode HTML entities
             text = html.unescape(text)
             text = re.sub(r'&[a-zA-Z0-9#]+;', '', text)
+            
+            # Normalize whitespace
             text = ' '.join(text.split())
             text = re.sub(r'[^\x20-\x7E\n\r\t]', '', text)
+            
             return text.strip()
 
         def extract_text_from_parts(parts: list) -> str:
@@ -466,7 +483,7 @@ class EmailService:
                     message=f"No email text found for {email.email_id}"
                 )
             
-            chunks = self.text_chunking_service.chunk_text(email_text, max_chunk_size=1000, overlap=100)
+            chunks = await self.text_chunking_service.chunk_text(email_text, max_chunk_size=1000, overlap=100, email_id=email.email_id)
             
             # Store each chunk
             for i, chunk in enumerate(chunks):
@@ -532,6 +549,66 @@ class EmailService:
                 message=f"Error storing chunk embedding: {e}"
             )
     
+    # ==================== Statistics Methods ====================
+    
+    async def get_embedding_stats(self, user_id: str) -> Dict[str, Any]:
+        """Get statistics about email embeddings for a user."""
+        try:
+            user = await self.supabase.get_user_by_email(user_id)
+            if not user:
+                return {"error": f"User {user_id} not found"}
+            
+            # Get Pinecone index stats
+            pinecone_stats = self.vector_store.get_index_stats()
+            
+            # Count user's email embeddings in Pinecone
+            # This is a simplified approach - in production you'd want to filter by user_id
+            total_vectors = pinecone_stats.get('total_vector_count', 0) if pinecone_stats else 0
+            
+            return {
+                "total_emails": total_vectors,
+                "user_id": user_id,
+                "index_name": self.vector_store.index_name
+            }
+                
+        except Exception as e:
+            logger.error(f"Error getting embedding stats: {e}")
+            return {"error": str(e)}
+    
+    async def get_sync_stats(self, user_id: str) -> Dict[str, Any]:
+        """Get email sync statistics for a user."""
+        try:
+            user = await self.supabase.get_user_by_email(user_id)
+            if not user:
+                return {"error": f"User {user_id} not found"}
+            
+            # Get stats from Supabase
+            response = self.supabase.supabase.table("emails").select("*").eq("user_email_id", user.email).execute()
+            
+            if response.data:
+                total_emails = len(response.data)
+                # For now, assume all emails are processed since we process them during sync
+                processed_emails = total_emails
+                unprocessed_emails = 0
+                
+                return {
+                    "total_emails_count": total_emails,
+                    "processed_emails_count": processed_emails,
+                    "unprocessed_emails_count": unprocessed_emails,
+                    "last_sync_date": max(email.get('created_at', '') for email in response.data) if response.data else None
+                }
+            else:
+                return {
+                    "total_emails_count": 0,
+                    "processed_emails_count": 0,
+                    "unprocessed_emails_count": 0,
+                    "last_sync_date": None
+                }
+                
+        except Exception as e:
+            logger.error(f"Error getting sync stats: {e}")
+            return {"error": str(e)}
+    
     # ==================== Clear/Delete Methods ====================    
     
     async def clear_all_email_embeddings(self) -> Dict[str, Any]:
@@ -551,6 +628,31 @@ class EmailService:
                 
         except Exception as e:
             logger.error(f"Error clearing all email embeddings: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    async def clear_user_supabase_data(self, user_id: str) -> Dict[str, Any]:
+        """Clear all email data for a specific user from Supabase"""
+        try:
+            user = await self.supabase.get_user_by_email(user_id)
+            if not user:
+                return {
+                    "success": False,
+                    "error": f"User {user_id} not found"
+                }
+            
+            # Delete all emails for this user from Supabase
+            response = self.supabase.supabase.table("emails").delete().eq("user_email_id", user.email).execute()
+            
+            return {
+                "success": True,
+                "message": f"Successfully cleared all email data for user {user_id} from Supabase"
+            }
+                
+        except Exception as e:
+            logger.error(f"Error clearing user Supabase data: {e}")
             return {
                 "success": False,
                 "error": str(e)

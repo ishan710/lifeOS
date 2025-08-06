@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     google_redirect_uri: str = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:3000/auth/gmail/callback")
     
 
+    
+
 
     class Config:
         env_file = ".env"

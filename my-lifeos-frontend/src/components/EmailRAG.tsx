@@ -44,8 +44,7 @@ const EmailRAG: React.FC<EmailRAGProps> = ({ userId }) => {
       document.head.removeChild(style);
     };
   }, []);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState<EmbeddingStats | null>(null);
@@ -54,7 +53,7 @@ const EmailRAG: React.FC<EmailRAGProps> = ({ userId }) => {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [isChatLoading, setIsChatLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'chat' | 'search' | 'sync'>('chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'sync'>('chat');
   const [syncStats, setSyncStats] = useState<any>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
@@ -78,33 +77,6 @@ const EmailRAG: React.FC<EmailRAGProps> = ({ userId }) => {
       setStats(data);
     } catch (err) {
       console.error('Failed to load embedding stats:', err);
-    }
-  };
-
-
-
-  const searchEmails = async () => {
-    if (!searchQuery.trim()) return;
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      const response = await fetch(
-        `http://localhost:8000/api/emails/embeddings/search?query=${encodeURIComponent(searchQuery)}&user_id=${encodeURIComponent(userId)}&top_k=5`
-      );
-      
-      const data = await response.json();
-      
-      if (data.success) {
-        setSearchResults(data.results);
-      } else {
-        setError('Search failed');
-      }
-    } catch (err) {
-      setError('Search error: ' + err);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -146,7 +118,7 @@ const EmailRAG: React.FC<EmailRAGProps> = ({ userId }) => {
       const data = await response.json();
       
       if (data.success) {
-        alert(`✅ Successfully synced emails to database & search!\n\n📧 New emails processed: ${data.new_emails || 0}\n📊 Total emails found: ${data.total_emails || 0}\n💾 Stored in database: ${data.synced_to_supabase || 0}\n🔍 Indexed for AI search: ${data.synced_to_pinecone || 0}\n\n🎉 Your emails are now searchable with AI!`);
+        alert(`✅ Successfully synced emails!\n\n📧 New emails processed: ${data.message}`);
         loadStats();
         loadSyncStats();
       } else {
@@ -167,8 +139,12 @@ const EmailRAG: React.FC<EmailRAGProps> = ({ userId }) => {
     await syncEmails(100, 10); // Full sync with 100 emails, batch size 10
   };
 
-  const clearPineconeData = async () => {
-    if (!window.confirm('⚠️ Are you sure you want to clear all your AI search data?\n\nThis will:\n• Delete all your email embeddings from the AI search index\n• Mark all emails as unprocessed\n• Require re-syncing to use AI search again\n\nThis action cannot be undone!')) {
+  const bulkSync = async () => {
+    await syncEmails(1000, 20); // Bulk sync with 1000 emails, batch size 20
+  };
+
+  const clearAllData = async () => {
+    if (!window.confirm('⚠️ Are you sure you want to clear all your email data?\n\nThis will:\n• Delete all your email embeddings from Pinecone\n• Delete all your emails from Supabase\n• Remove all AI search capabilities\n\nThis action cannot be undone!')) {
       return;
     }
 
@@ -176,22 +152,38 @@ const EmailRAG: React.FC<EmailRAGProps> = ({ userId }) => {
     setError(null);
 
     try {
-      const response = await fetch(`http://localhost:8000/api/emails/clear-embeddings`, {
+      // Clear Pinecone embeddings
+      const pineconeResponse = await fetch(`http://localhost:8000/api/emails/clear-embeddings`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         }
       });
       
-      const data = await response.json();
+      const pineconeData = await pineconeResponse.json();
       
-      if (data.success) {
-        alert(`✅ Successfully cleared AI search data!\n\n🗑️ All your email embeddings have been removed from the search index.\n\n💡 You can now re-sync your emails to rebuild the search index.`);
-        loadStats();
-        loadSyncStats();
-      } else {
-        setError(data.error || 'Failed to clear AI search data');
+      if (!pineconeData.success) {
+        throw new Error(`Failed to clear Pinecone data: ${pineconeData.error || 'Unknown error'}`);
       }
+
+      // Clear Supabase emails
+      const supabaseResponse = await fetch(`http://localhost:8000/api/emails/clear-supabase`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ user_id: userId })
+      });
+      
+      const supabaseData = await supabaseResponse.json();
+      
+      if (!supabaseData.success) {
+        throw new Error(`Failed to clear Supabase data: ${supabaseData.error || 'Unknown error'}`);
+      }
+
+      alert(`✅ Successfully cleared all email data!\n\n🗑️ All your emails have been removed from both Pinecone and Supabase.\n\n💡 You can now re-sync your emails to rebuild the data.`);
+      loadStats();
+      loadSyncStats();
     } catch (err) {
       setError('Clear error: ' + err);
     } finally {
@@ -223,7 +215,9 @@ const EmailRAG: React.FC<EmailRAGProps> = ({ userId }) => {
           user_id: userId,
           question: userMessage.content,
           content_type: 'email',
-          max_context_items: 25
+          max_context_items: 5,
+          max_tokens_per_item: 200,
+          truncate_context: true
         })
       });
 
@@ -253,7 +247,7 @@ const EmailRAG: React.FC<EmailRAGProps> = ({ userId }) => {
 
   return (
     <div style={{ padding: '24px', fontFamily: '"Google Sans", "Roboto", Arial, sans-serif' }}>
-      <h2 style={{ marginBottom: '24px', color: '#1f1f1f' }}>🔍 Email RAG Search</h2>
+      <h2 style={{ marginBottom: '24px', color: '#1f1f1f' }}>🔍 Email AI Assistant</h2>
       
       {/* Tab Navigation */}
       <div style={{ 
@@ -278,22 +272,6 @@ const EmailRAG: React.FC<EmailRAGProps> = ({ userId }) => {
           💬 Chat
         </button>
         <button
-          onClick={() => setActiveTab('search')}
-          style={{
-            padding: '12px 24px',
-            backgroundColor: activeTab === 'search' ? '#1a73e8' : 'transparent',
-            color: activeTab === 'search' ? 'white' : '#5f6368',
-            border: 'none',
-            borderBottom: activeTab === 'search' ? '2px solid #1a73e8' : 'none',
-            cursor: 'pointer',
-            fontSize: '14px',
-            fontWeight: '500',
-            borderRadius: '8px 8px 0 0'
-          }}
-        >
-          🔍 Search
-        </button>
-        <button
           onClick={() => setActiveTab('sync')}
           style={{
             padding: '12px 24px',
@@ -312,10 +290,10 @@ const EmailRAG: React.FC<EmailRAGProps> = ({ userId }) => {
       </div>
       
       {/* Stats Section */}
-      <div style={{
-        backgroundColor: '#f8f9fa',
+      <div style={{ 
+        backgroundColor: '#f8f9fa', 
         border: '1px solid #dadce0',
-        borderRadius: '8px',
+        borderRadius: '8px', 
         padding: '16px',
         marginBottom: '24px'
       }}>
@@ -327,7 +305,7 @@ const EmailRAG: React.FC<EmailRAGProps> = ({ userId }) => {
               <span><strong>{stats.total_emails}</strong> emails ready for AI search</span>
             </div>
             <div style={{ 
-              fontSize: '12px', 
+              fontSize: '12px',
               color: '#5f6368',
               backgroundColor: '#e8f0fe',
               padding: '6px 8px',
@@ -345,79 +323,29 @@ const EmailRAG: React.FC<EmailRAGProps> = ({ userId }) => {
         )}
       </div>
 
-      {/* Actions Section */}
-      <div style={{ marginBottom: '24px' }}>
-        <div style={{
-          backgroundColor: '#e8f5e8',
-          border: '1px solid #34a853',
-          borderRadius: '8px',
-          padding: '12px',
-          marginBottom: '16px',
-          fontSize: '14px',
-          color: '#137333'
-        }}>
-          ✨ <strong>Improved!</strong> Email indexing is now automatic when you sync emails. Use the <strong>Sync tab</strong> for the complete setup.
-        </div>
-        
-        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-          <button
-            onClick={() => setActiveTab('sync')}
-            style={{
-              padding: '12px 20px',
-              backgroundColor: '#1a73e8',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontSize: '14px',
-              fontWeight: '500'
-            }}
-          >
-            🚀 Go to Sync & Setup
-          </button>
-
-          <button
-            onClick={() => quickSync()}
-            disabled={isSyncing}
-            style={{
-              padding: '12px 20px',
-              backgroundColor: isSyncing ? '#ccc' : '#34a853',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: isSyncing ? 'not-allowed' : 'pointer',
-              fontSize: '14px',
-              fontWeight: '500'
-            }}
-          >
-            {isSyncing ? '⏳ Processing...' : '⚡ Quick Setup (20 emails)'}
-          </button>
-        </div>
-      </div>
-
       {/* Chat Interface */}
       {activeTab === 'chat' && (
-        <div style={{
+        <div style={{ 
           backgroundColor: '#fff',
-          border: '1px solid #dadce0',
+          border: '1px solid #dadce0', 
           borderRadius: '8px',
           height: '500px',
           display: 'flex',
           flexDirection: 'column'
         }}>
           {/* Chat Messages */}
-          <div style={{
+          <div style={{ 
             flex: 1,
-            overflowY: 'auto',
+            overflowY: 'auto', 
             padding: '16px',
             display: 'flex',
             flexDirection: 'column',
             gap: '12px'
           }}>
             {chatMessages.length === 0 ? (
-              <div style={{
-                textAlign: 'center',
-                color: '#5f6368',
+              <div style={{ 
+                textAlign: 'center', 
+                color: '#5f6368', 
                 marginTop: '100px'
               }}>
                 <div style={{ fontSize: '48px', marginBottom: '16px' }}>💬</div>
@@ -493,9 +421,9 @@ const EmailRAG: React.FC<EmailRAGProps> = ({ userId }) => {
           </div>
 
           {/* Chat Input */}
-          <div style={{
+          <div style={{ 
             borderTop: '1px solid #dadce0',
-            padding: '16px',
+            padding: '16px', 
             backgroundColor: '#f8f9fa'
           }}>
             <div style={{ display: 'flex', gap: '8px' }}>
@@ -543,139 +471,6 @@ const EmailRAG: React.FC<EmailRAGProps> = ({ userId }) => {
         </div>
       )}
 
-            {/* Search Interface */}
-      {activeTab === 'search' && (
-        <>
-          {/* Search Section */}
-          <div style={{
-            backgroundColor: '#fff',
-            border: '1px solid #dadce0',
-            borderRadius: '8px',
-            padding: '24px',
-            marginBottom: '24px'
-          }}>
-            <h3 style={{ margin: '0 0 16px 0', fontSize: '18px' }}>Search Your Emails</h3>
-            
-            <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Ask about your emails... (e.g., 'emails about meetings', 'messages from John')"
-                style={{
-                  flex: 1,
-                  padding: '12px 16px',
-                  border: '1px solid #dadce0',
-                  borderRadius: '8px',
-                  fontSize: '14px',
-                  outline: 'none'
-                }}
-                onKeyPress={(e) => e.key === 'Enter' && searchEmails()}
-                onFocus={(e) => e.target.style.borderColor = '#1a73e8'}
-                onBlur={(e) => e.target.style.borderColor = '#dadce0'}
-              />
-              
-              <button
-                onClick={searchEmails}
-                disabled={loading || !searchQuery.trim()}
-                style={{
-                  padding: '12px 24px',
-                  backgroundColor: (!searchQuery.trim() || loading) ? '#ccc' : '#1a73e8',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '8px',
-                  cursor: (!searchQuery.trim() || loading) ? 'not-allowed' : 'pointer',
-                  fontSize: '14px',
-                  fontWeight: '500'
-                }}
-              >
-                {loading ? '🔍 Searching...' : '🔍 Search'}
-              </button>
-            </div>
-
-            <div style={{ fontSize: '12px', color: '#5f6368' }}>
-              💡 Try: "emails about project deadlines", "messages from my manager", "flight confirmations"
-            </div>
-          </div>
-
-          {/* Error Display */}
-          {error && (
-            <div style={{
-              backgroundColor: '#fef2f2',
-              border: '1px solid #f87171',
-              borderRadius: '8px',
-              padding: '12px',
-              marginBottom: '24px',
-              color: '#dc2626'
-            }}>
-              ⚠️ {error}
-            </div>
-          )}
-
-          {/* Search Results */}
-          {searchResults.length > 0 && (
-            <div>
-              <h3 style={{ marginBottom: '16px', fontSize: '18px' }}>
-                🎯 Search Results ({searchResults.length})
-              </h3>
-              
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                {searchResults.map((result, index) => (
-                  <div
-                    key={result.email_id}
-                    style={{
-                      backgroundColor: '#fff',
-                      border: '1px solid #dadce0',
-                      borderRadius: '8px',
-                      padding: '16px',
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '8px' }}>
-                      <h4 style={{ margin: 0, fontSize: '16px', color: '#1f1f1f' }}>
-                        {result.subject || '(No Subject)'}
-                      </h4>
-                      <span style={{
-                        backgroundColor: '#e8f0fe',
-                        color: '#1565c0',
-                        padding: '2px 8px',
-                        borderRadius: '4px',
-                        fontSize: '12px',
-                        fontWeight: '500'
-                      }}>
-                        {Math.round(result.similarity_score * 100)}% match
-                      </span>
-                    </div>
-                    
-                    <div style={{ fontSize: '14px', color: '#5f6368', marginBottom: '8px' }}>
-                      <strong>From:</strong> {result.from} | <strong>Date:</strong> {new Date(result.date).toLocaleDateString()}
-                    </div>
-                    
-                    <p style={{ margin: '0', fontSize: '14px', color: '#202124', lineHeight: '1.4' }}>
-                      {result.snippet}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* No Results */}
-          {searchQuery && !loading && searchResults.length === 0 && !error && (
-            <div style={{
-              textAlign: 'center',
-              padding: '48px',
-              color: '#5f6368',
-              fontSize: '16px'
-            }}>
-              <div style={{ fontSize: '48px', marginBottom: '16px' }}>🤷‍♂️</div>
-              <p>No emails found matching "{searchQuery}"</p>
-              <p style={{ fontSize: '14px' }}>Try a different search term or index more emails first.</p>
-            </div>
-          )}
-        </>
-      )}
-
       {/* Sync Interface */}
       {activeTab === 'sync' && (
         <div style={{
@@ -684,7 +479,7 @@ const EmailRAG: React.FC<EmailRAGProps> = ({ userId }) => {
           borderRadius: '8px',
           padding: '24px'
         }}>
-          <h3 style={{ margin: '0 0 20px 0', fontSize: '18px' }}>🔄 Email Sync Dashboard</h3>
+          <h3 style={{ margin: '0 0 20px 0', fontSize: '18px' }}>🔄 Email Sync</h3>
           
           {/* Sync Stats */}
           <div style={{
@@ -694,7 +489,7 @@ const EmailRAG: React.FC<EmailRAGProps> = ({ userId }) => {
             padding: '16px',
             marginBottom: '24px'
           }}>
-            <h4 style={{ margin: '0 0 12px 0', fontSize: '16px' }}>📊 Email Database & Search Status</h4>
+            <h4 style={{ margin: '0 0 12px 0', fontSize: '16px' }}>📊 Email Status</h4>
             {syncStats ? (
               <div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', marginBottom: '16px' }}>
@@ -715,12 +510,6 @@ const EmailRAG: React.FC<EmailRAGProps> = ({ userId }) => {
                       {syncStats.unprocessed_emails_count || 0}
                     </div>
                     <div style={{ fontSize: '12px', color: '#5f6368' }}>⏳ Pending</div>
-                  </div>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#fbbc04' }}>
-                      {syncStats.last_sync_date ? new Date(syncStats.last_sync_date).toLocaleDateString() : 'Never'}
-                    </div>
-                    <div style={{ fontSize: '12px', color: '#5f6368' }}>📅 Last Sync</div>
                   </div>
                 </div>
                 
@@ -766,7 +555,7 @@ const EmailRAG: React.FC<EmailRAGProps> = ({ userId }) => {
 
           {/* Sync Actions */}
           <div style={{ marginBottom: '24px' }}>
-            <h4 style={{ margin: '0 0 16px 0', fontSize: '16px' }}>🚀 Sync & Search Setup</h4>
+            <h4 style={{ margin: '0 0 16px 0', fontSize: '16px' }}>🚀 Sync Emails</h4>
             
             {isSyncing && (
               <div style={{
@@ -814,9 +603,10 @@ const EmailRAG: React.FC<EmailRAGProps> = ({ userId }) => {
                   borderRadius: '50%',
                   animation: 'spin 1s linear infinite'
                 }}></div>
-                <strong>Clearing AI search data...</strong> Removing all email embeddings from search index
+                <strong>Clearing all data...</strong> Removing emails from Pinecone and Supabase
               </div>
             )}
+
             <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
               <button
                 onClick={() => quickSync()}
@@ -832,21 +622,11 @@ const EmailRAG: React.FC<EmailRAGProps> = ({ userId }) => {
                   fontWeight: '500',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '8px',
-                  position: 'relative'
+                  gap: '8px'
                 }}
               >
                 <span>⚡</span>
-                {isSyncing ? 'Processing...' : 'Quick Setup'}
-                <div style={{ 
-                  fontSize: '11px', 
-                  position: 'absolute', 
-                  bottom: '4px', 
-                  right: '8px',
-                  opacity: 0.8
-                }}>
-                  20 emails
-                </div>
+                {isSyncing ? 'Processing...' : 'Quick Sync (20 emails)'}
               </button>
 
               <button
@@ -863,25 +643,15 @@ const EmailRAG: React.FC<EmailRAGProps> = ({ userId }) => {
                   fontWeight: '500',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '8px',
-                  position: 'relative'
+                  gap: '8px'
                 }}
               >
                 <span>🔄</span>
-                {isSyncing ? 'Processing...' : 'Complete Setup'}
-                <div style={{ 
-                  fontSize: '11px', 
-                  position: 'absolute', 
-                  bottom: '4px', 
-                  right: '8px',
-                  opacity: 0.8
-                }}>
-                  100 emails
-                </div>
+                {isSyncing ? 'Processing...' : 'Full Sync (100 emails)'}
               </button>
 
               <button
-                onClick={() => syncEmails(50, 10)}
+                onClick={() => bulkSync()}
                 disabled={isSyncing}
                 style={{
                   padding: '16px 24px',
@@ -894,190 +664,56 @@ const EmailRAG: React.FC<EmailRAGProps> = ({ userId }) => {
                   fontWeight: '500',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '8px',
-                  position: 'relative'
+                  gap: '8px'
                 }}
               >
-                <span>⚙️</span>
-                {isSyncing ? 'Processing...' : 'Custom Setup'}
-                <div style={{ 
-                  fontSize: '11px', 
-                  position: 'absolute', 
-                  bottom: '4px', 
-                  right: '8px',
-                  opacity: 0.8
-                }}>
-                  50 emails
-                </div>
+                <span>🚀</span>
+                {isSyncing ? 'Processing...' : 'Bulk Sync (1000 emails)'}
               </button>
             </div>
 
-            {/* Date Filtering Section */}
-            <div style={{ marginTop: '20px', padding: '16px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e9ecef' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-                <input
-                  type="checkbox"
-                  id="useDateFilter"
-                  checked={useDateFilter}
-                  onChange={(e) => setUseDateFilter(e.target.checked)}
-                  style={{ margin: 0 }}
-                />
-                <label htmlFor="useDateFilter" style={{ fontSize: '14px', fontWeight: '500', cursor: 'pointer' }}>
-                  📅 Filter emails by date range
-                </label>
-              </div>
-              
-              {useDateFilter && (
-                <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <label style={{ fontSize: '12px', color: '#666' }}>Start Date (YYYY/MM/DD)</label>
-                    <input
-                      type="text"
-                      placeholder="2024/01/01"
-                      value={startDate}
-                      onChange={(e) => setStartDate(e.target.value)}
-                      style={{
-                        padding: '8px 12px',
-                        border: '1px solid #ddd',
-                        borderRadius: '4px',
-                        fontSize: '14px',
-                        width: '140px'
-                      }}
-                    />
-                  </div>
-                  
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <label style={{ fontSize: '12px', color: '#666' }}>End Date (YYYY/MM/DD)</label>
-                    <input
-                      type="text"
-                      placeholder="2024/12/31"
-                      value={endDate}
-                      onChange={(e) => setEndDate(e.target.value)}
-                      style={{
-                        padding: '8px 12px',
-                        border: '1px solid #ddd',
-                        borderRadius: '4px',
-                        fontSize: '14px',
-                        width: '140px'
-                      }}
-                    />
-                  </div>
-                  
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', justifyContent: 'end' }}>
-                    <button
-                      onClick={() => syncEmails(10000, 20)}
-                      disabled={isSyncing || (!startDate && !endDate)}
-                      style={{
-                        padding: '8px 16px',
-                        backgroundColor: (isSyncing || (!startDate && !endDate)) ? '#ccc' : '#28a745',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '4px',
-                        cursor: (isSyncing || (!startDate && !endDate)) ? 'not-allowed' : 'pointer',
-                        fontSize: '13px',
-                        fontWeight: '500'
-                      }}
-                    >
-                      {isSyncing ? 'Syncing...' : 'Sync Date Range'}
-                    </button>
-                  </div>
-                </div>
-              )}
-              
-              {useDateFilter && (
-                <div style={{ marginTop: '8px', fontSize: '12px', color: '#666', lineHeight: '1.4' }}>
-                  💡 <strong>Date Format:</strong> Use YYYY/MM/DD format (e.g., 2024/01/15). Leave one field empty to sync from/to that date only.
-                  <br />
-                  🎯 <strong>Sync Range:</strong> Will sync ALL emails within the specified date range (up to 10,000 emails).
-                </div>
-              )}
+            {/* Clear Data Section */}
+            <div style={{ marginTop: '24px', padding: '16px', backgroundColor: '#fff8e1', borderRadius: '8px', border: '1px solid #ffb74d' }}>
+              <h4 style={{ margin: '0 0 12px 0', fontSize: '16px', color: '#f57c00' }}>🗑️ Clear All Data</h4>
+              <p style={{ margin: '0 0 16px 0', fontSize: '14px', color: '#e65100', lineHeight: '1.5' }}>
+                This will permanently delete all your emails from both Pinecone (AI search) and Supabase (database).
+              </p>
+              <button
+                onClick={clearAllData}
+                disabled={isClearing || isSyncing}
+                style={{
+                  padding: '12px 20px',
+                  backgroundColor: (isClearing || isSyncing) ? '#ccc' : '#dc3545',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: (isClearing || isSyncing) ? 'not-allowed' : 'pointer',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}
+              >
+                <span>🗑️</span>
+                {isClearing ? 'Clearing...' : 'Clear All Email Data'}
+              </button>
             </div>
           </div>
+        </div>
+      )}
 
-          {/* Clear Data Section */}
-          <div style={{ marginBottom: '24px' }}>
-            <h4 style={{ margin: '0 0 16px 0', fontSize: '16px' }}>🗑️ Clear AI Search Data</h4>
-            <div style={{
-              backgroundColor: '#fff8e1',
-              border: '1px solid #ffb74d',
-              borderRadius: '8px',
-              padding: '16px',
-              marginBottom: '16px'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                <span style={{ fontSize: '18px' }}>⚠️</span>
-                <span style={{ fontWeight: '500', color: '#f57c00' }}>Caution: Data Clearing</span>
-              </div>
-              <div style={{ fontSize: '14px', color: '#e65100', lineHeight: '1.5' }}>
-                This will remove all your email embeddings from the AI search index. You'll need to re-sync your emails to use AI search again.
-              </div>
-            </div>
-            
-            <button
-              onClick={clearPineconeData}
-              disabled={isClearing || isSyncing}
-              style={{
-                padding: '12px 20px',
-                backgroundColor: isClearing ? '#ccc' : '#dc3545',
-                color: 'white',
-                border: 'none',
-                borderRadius: '8px',
-                cursor: (isClearing || isSyncing) ? 'not-allowed' : 'pointer',
-                fontSize: '14px',
-                fontWeight: '500',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}
-            >
-              <span>🗑️</span>
-              {isClearing ? 'Clearing...' : 'Clear AI Search Data'}
-            </button>
-          </div>
-
-          {/* Sync Info */}
-          <div style={{
-            backgroundColor: '#e8f0fe',
-            border: '1px solid #dadce0',
-            borderRadius: '8px',
-            padding: '16px'
-          }}>
-            <h4 style={{ margin: '0 0 12px 0', fontSize: '16px' }}>🚀 One-Step Email Sync</h4>
-            <div style={{ 
-              backgroundColor: '#ffffff', 
-              border: '1px solid #1a73e8', 
-              borderRadius: '6px', 
-              padding: '12px', 
-              marginBottom: '12px',
-              fontSize: '13px',
-              fontWeight: '500',
-              color: '#1a73e8'
-            }}>
-              ✨ <strong>NEW:</strong> Sync now automatically stores emails AND makes them AI-searchable in one step!
-            </div>
-            <ul style={{ margin: '0', paddingLeft: '20px', fontSize: '14px', lineHeight: '1.5' }}>
-              <li><strong>Quick Sync:</strong> Process 20 most recent emails (fast, perfect for daily use)</li>
-              <li><strong>Full Sync:</strong> Process up to 100 recent emails (comprehensive setup)</li>
-              <li><strong>Custom Sync:</strong> Process 50 emails with optimized batching</li>
-              <li><strong>🔄 Gmail → 💾 Database → 🤖 AI Search:</strong> All happens automatically</li>
-              <li><strong>🔍 Instant Search:</strong> Emails are immediately searchable after sync</li>
-              <li><strong>📝 No Duplicates:</strong> Only new emails are processed</li>
-            </ul>
-          </div>
-
-          {/* Error Display */}
-          {error && (
-            <div style={{
-              backgroundColor: '#fef2f2',
-              border: '1px solid #f87171',
-              borderRadius: '8px',
-              padding: '12px',
-              marginTop: '16px',
-              color: '#dc2626'
-            }}>
-              ⚠️ {error}
-            </div>
-          )}
+      {/* Error Display */}
+      {error && (
+        <div style={{
+          backgroundColor: '#fef2f2',
+          border: '1px solid #f87171',
+          borderRadius: '8px',
+          padding: '12px',
+          marginTop: '16px',
+          color: '#dc2626'
+        }}>
+          ⚠️ {error}
         </div>
       )}
     </div>

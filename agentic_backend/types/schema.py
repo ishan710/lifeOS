@@ -19,6 +19,8 @@ class Chunk:
     chunk_type: str
     chunk_id: str
     chunk_text: str
+    email_id: str
+    type: str
 
 @dataclass
 class EmailEmbedding:

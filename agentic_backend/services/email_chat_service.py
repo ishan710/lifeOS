@@ -6,6 +6,7 @@ Allows users to ask questions about any content and get AI-generated answers.
 import logging
 import os
 from typing import List, Dict, Any, Optional
+from agentic_backend.types.schema import Chunk, Email
 from agentic_backend.vector_store import VectorStore
 from agentic_backend.services.supabase_service import SupabaseService
 from langchain_openai import ChatOpenAI
@@ -23,7 +24,7 @@ class ChatService:
         self.supabase = SupabaseService()
         self.llm = ChatOpenAI(
             model="gpt-3.5-turbo",
-            temperature=0.1
+            temperature=0.1,
         )
         
     async def ask_question(self, user_id: str, question: str, content_type: str = "all", max_context_items: int = 25) -> Dict[str, Any]:
@@ -43,14 +44,14 @@ class ChatService:
             logger.info(f"Processing question for user {user_id}: {question}")
             
             # Step 1: Search for relevant content
-            relevant_items = await self._search_content(
+            chunks_context = await self.get_chunks_by_query(
                 query=question,
                 user_id=user_id,
                 content_type=content_type,
                 top_k=max_context_items
             )
             
-            if not relevant_items:
+            if not chunks_context:
                 return {
                     "success": False,
                     "answer": f"I couldn't find any relevant {content_type} to answer your question. Please try rephrasing your question or check if you have content indexed.",
@@ -59,25 +60,21 @@ class ChatService:
                 }
             
             # Step 2: Prepare context from relevant items
-            email_ids = [item["metadata"]["email_id"] for item in relevant_items]
-            emails = await self._get_emails(email_ids)
-            print("emails", emails)
-            context = self._prepare_context(emails, content_type)
-            print("context", context)
+            context = self._prepare_context(chunks_context, content_type)
             # Step 3: Generate answer using LLM
             answer = await self._generate_answer(question, context, user_id, content_type)
             
             return {
                 "success": True,
                 "answer": answer,
-                "context_items": relevant_items,
+                "context_items": chunks_context,
                 "question": question,
-                "context_used": len(relevant_items),
+                "context_used": len(chunks_context),
                 "content_type": content_type
             }
             
         except Exception as e:
-            logger.error(f"Error processing question for user {user_id}: {e}")
+            print("DEBUG: error =", e)
             return {
                 "success": False,
                 "answer": f"Sorry, I encountered an error while processing your question: {str(e)}",
@@ -85,7 +82,7 @@ class ChatService:
                 "question": question
             }
     
-    async def _search_content(self, query: str, user_id: str, content_type: str = "all", top_k: int = 5) -> List[Dict[str, Any]]:
+    async def get_chunks_by_query(self, query: str, user_id: str, content_type: str = "all", top_k: int = 5) -> List[Chunk]:
         """
         Search for relevant content in the vector store.
         
@@ -101,44 +98,39 @@ class ChatService:
         try:
             # Generate embedding for search query
             query_embedding = self.vector_store.get_embedding(query)
-            
             # Search in Pinecone with user filter
             search_results = self.vector_store.search(
                 embedding=query_embedding,
                 top_k=top_k,
-                filter={"user_id": user_id}
+                # TODO: add user_id filter
+                # filter={"user_id": user_id}
             )
-            
             # Process results
             items = []
             try:
                 matches = search_results["matches"]
-                for match in matches:
-                        items.append({
-                            "email_id": getattr(match, 'email_id', ''),
-                            "content": match.metadata.get("content", ""),
-                            "similarity_score": getattr(match, 'score', 0.0),
-                            "metadata": match.metadata,
-                            "user_id": match.metadata.get("user_id")
-                        })
+                chunks = [Chunk(**match["metadata"]) for match in matches]
+                return chunks
             except Exception as e:
+                print("DEBUG: error =", e)
                 logger.warning(f"Error processing search results: {e}")
                 items = []
             
             return items
             
         except Exception as e:
+            print("DEBUG: error =", e)
             logger.error(f"Failed to search content: {e}")
             return []
 
-    async def _get_emails(self, email_ids: List[str]) -> List[Dict[str, Any]]:
+    async def _get_emails(self, email_ids: List[str]) -> List[Email]:
         """
         Get emails for a user.
         """
         search_results = await self.supabase.get_emails_by_ids(email_ids)
-        return search_results
+        return [Email(**email) for email in search_results]
 
-    def _prepare_context(self, items: List[Dict[str, Any]], content_type: str) -> str:
+    def _prepare_context(self, items: List[Chunk], content_type: str) -> str:
         """
         Prepare context from search results for the LLM.
         
@@ -151,7 +143,7 @@ class ChatService:
         """
         context_parts = []
         for item in items:
-            context_parts.append(item["content"])
+            context_parts.append(item.chunk_text)
         return "\n".join(context_parts)
     
     async def _generate_answer(self, question: str, context: str, user_id: str, content_type: str) -> str:
